@@ -86,6 +86,14 @@ async fn main() {
         };
         storage.save_validator_set(&set);
         storage.update_balance("aur1initial_validator_address", 1_000_000);
+        
+        // Initialize Test Accounts for Wallet Demo
+        storage.update_balance("genesis", 10_000_000_000); // Treasury - 10B AUR
+        storage.update_balance("alice", 1_000_000); // Test user - 1M AUR
+        storage.update_balance("bob", 1_000_000); // Test user - 1M AUR
+        storage.update_balance("charlie", 500_000); // Test user - 500K AUR
+        storage.update_balance("diana", 500_000); // Test user - 500K AUR
+        info!("Initialized test accounts: genesis, alice, bob, charlie, diana");
 
         // Initialize Global State
         let initial_state = crate::core::ChainState {
@@ -396,6 +404,17 @@ async fn main() {
         }
     });
 
+    // RPC: aureum_getNonce
+    let storage_nonce = storage.clone();
+    io.add_method("aureum_getNonce", move |params: Params| {
+        let storage = storage_nonce.clone();
+        async move {
+            let address: String = params.parse().expect("Invalid address parameter");
+            let nonce = storage.get_nonce(&address);
+            Ok(Value::Number(nonce.into()))
+        }
+    });
+
     // RPC: aureum_getBalance
     let storage_clone = storage.clone();
     io.add_method("aureum_getBalance", move |params: Params| {
@@ -476,8 +495,10 @@ async fn main() {
     });
 
     let server = ServerBuilder::new(io)
-        .start_http(&"127.0.0.1:3030".parse().unwrap())
+        .start_http(&"0.0.0.0:8545".parse().unwrap())
         .expect("Unable to start RPC server");
+    
+    info!("🚀 RPC Server started on http://0.0.0.0:8545");
 
     info!("Aureum JSON-RPC Server available at http://127.0.0.1:3030");
     
