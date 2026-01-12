@@ -2,7 +2,7 @@ use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use log::{info, warn};
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub enum Jurisdiction {
     Portugal,
     UAE,

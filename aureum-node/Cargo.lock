@@ -3117,7 +3117,6 @@ dependencies = [
  "enumn",
  "hashbrown 0.14.5",
  "hex",
- "once_cell",
  "serde",
 ]
 

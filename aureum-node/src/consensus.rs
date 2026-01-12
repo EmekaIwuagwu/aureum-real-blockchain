@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use log::{info, warn, error};
 
-#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode, PartialEq, Eq, Hash)]
 pub enum BftStep {
     Propose,
     Prevote,

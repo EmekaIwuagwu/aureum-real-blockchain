@@ -1,26 +1,14 @@
-mod core;
-mod storage;
-mod consensus;
-mod network;
-mod vm;
-mod compliance;
-mod oracle;
-
-
-use log::{info, warn, error};
-use jsonrpc_http_server::jsonrpc_core::{IoHandler, Value, Params};
-use jsonrpc_http_server::ServerBuilder;
-use std::sync::Arc;
-use tokio::sync::{Mutex, mpsc};
-use crate::storage::ChainStorage;
-use crate::consensus::ConsensusEngine;
-use crate::vm::AureumVM;
-use crate::compliance::{ComplianceEngine, ComplianceProfile, Jurisdiction};
-use crate::oracle::{AureumOracle, OracleReport};
-use crate::network::{P2PNetwork, TOPIC_TRANSACTIONS, TOPIC_BLOCKS};
-use crate::core::{Block, Validator, ValidatorRole, ValidatorSet};
+use aureum_node::{core, consensus, storage, network, vm, compliance, oracle};
+use aureum_node::core::{Transaction, TransactionType, Block, Validator, ValidatorRole, ValidatorSet};
+use aureum_node::storage::ChainStorage;
+use aureum_node::consensus::ConsensusEngine;
+use aureum_node::vm::AureumVM;
+use aureum_node::compliance::{ComplianceEngine, ComplianceProfile, Jurisdiction};
+use aureum_node::oracle::{AureumOracle, OracleReport};
+use aureum_node::network::{P2PNetwork, TOPIC_TRANSACTIONS, TOPIC_BLOCKS};
 use futures::StreamExt;
 use libp2p::swarm::SwarmEvent;
+use parity_scale_codec::Decode;
 
 #[tokio::main]
 async fn main() {
@@ -153,7 +141,7 @@ async fn main() {
                         }
 
                         match tx.tx_type {
-                            crate::core::TransactionType::Transfer => {
+                            aureum_node::core::TransactionType::Transfer => {
                                 let balance_from = storage_loop.get_balance(&tx.sender);
                                 if balance_from >= tx.amount + tx.fee {
                                     storage_loop.update_balance(&tx.sender, balance_from - (tx.amount + tx.fee));
@@ -162,9 +150,9 @@ async fn main() {
                                     storage_loop.increment_nonce(&tx.sender);
                                 }
                             },
-                            crate::core::TransactionType::TokenizeProperty { ref address, ref metadata } => {
+                            aureum_node::core::TransactionType::TokenizeProperty { ref address, ref metadata } => {
                                 // Phase 2 MVP: Create persistent property record
-                                let prop = crate::core::Property {
+                                let prop = aureum_node::core::Property {
                                     id: format!("prop_{}", tx.nonce),
                                     owner: tx.sender.clone(),
                                     co_owners: vec![],
@@ -187,16 +175,16 @@ async fn main() {
                                 storage_loop.increment_nonce(&tx.sender);
                                 info!("PROPERTY REGISTERED: {} (Owner: {})", prop.id, prop.owner);
                             },
-                            crate::core::TransactionType::ApplyForVisa { ref property_id, ref program } => {
+                            aureum_node::core::TransactionType::ApplyForVisa { ref property_id, ref program } => {
                                 // Phase 2: Link property ownership to visa application
                                 if let Some(prop) = storage_loop.get_property(property_id) {
                                     if prop.owner == tx.sender {
-                                        let app = crate::core::VisaApplication {
+                                        let app = aureum_node::core::VisaApplication {
                                             applicant: tx.sender.clone(),
                                             property_id: property_id.clone(),
                                             investment_amount: prop.valuation_eur,
                                             program: program.clone(),
-                                            status: crate::core::ApplicationStatus::Pending,
+                                            status: aureum_node::core::ApplicationStatus::Pending,
                                             timestamp: block.header.timestamp,
                                         };
                                         storage_loop.save_visa_application(&app);
@@ -205,7 +193,7 @@ async fn main() {
                                     }
                                 }
                             },
-                            crate::core::TransactionType::ContractCreate { ref bytecode } => {
+                            aureum_node::core::TransactionType::ContractCreate { ref bytecode } => {
                                 // Institutional execution of Solidity/Quorlin Bytecode
                                 match vm_loop.execute_transaction(&tx.sender, "0x0000000000000000000000000000000000000000", bytecode.clone(), tx.amount) {
                                     Ok(_) => {
@@ -215,7 +203,7 @@ async fn main() {
                                     Err(e) => warn!("Contract deployment failed: {}", e),
                                 }
                             },
-                            crate::core::TransactionType::ContractCall { ref target, ref data } => {
+                            aureum_node::core::TransactionType::ContractCall { ref target, ref data } => {
                                 // Institutional interaction with smart contract state
                                 match vm_loop.execute_transaction(&tx.sender, target, data.clone(), tx.amount) {
                                     Ok(_) => {
@@ -226,7 +214,7 @@ async fn main() {
                                 }
                             },
                             // Advanced Property Operations
-                            crate::core::TransactionType::AddMortgage { ref property_id, ref details } => {
+                            aureum_node::core::TransactionType::AddMortgage { ref property_id, ref details } => {
                                 if let Some(mut prop) = storage_loop.get_property(property_id) {
                                     if prop.owner == tx.sender {
                                         prop.mortgages.push(details.clone());
@@ -236,7 +224,7 @@ async fn main() {
                                     }
                                 }
                             },
-                            crate::core::TransactionType::ReleaseLien { ref property_id, ref lien_id } => {
+                            aureum_node::core::TransactionType::ReleaseLien { ref property_id, ref lien_id } => {
                                 if let Some(mut prop) = storage_loop.get_property(property_id) {
                                     // In a real implementation, this would require authority/lender signature
                                     prop.liens.retain(|l| l != lien_id);
@@ -245,7 +233,7 @@ async fn main() {
                                     info!("LIEN RELEASED for Property {}", property_id);
                                 }
                             },
-                            crate::core::TransactionType::TransferFraction { ref property_id, ref to, basis_points } => {
+                            aureum_node::core::TransactionType::TransferFraction { ref property_id, ref to, basis_points } => {
                                 if let Some(mut prop) = storage_loop.get_property(property_id) {
                                     if prop.owner == tx.sender {
                                         prop.co_owners.push((to.clone(), basis_points));
@@ -256,9 +244,9 @@ async fn main() {
                                 }
                             },
                             // Multi-Sig Creation
-                            crate::core::TransactionType::CreateMultiSig { ref owners, threshold } => {
-                                let ms_address = crate::core::generate_address(tx.sender.as_bytes()); // Deterministic generation hack
-                                let ms_account = crate::core::MultiSigAccount {
+                            aureum_node::core::TransactionType::CreateMultiSig { ref owners, threshold } => {
+                                let ms_address = aureum_node::core::generate_address(tx.sender.as_bytes()); // Deterministic generation hack
+                                let ms_account = aureum_node::core::MultiSigAccount {
                                     address: ms_address.clone(),
                                     owners: owners.clone(),
                                     threshold,
@@ -277,7 +265,7 @@ async fn main() {
 
                     // 3. Construct and Save Block
                     let mut block = Block {
-                        header: crate::core::BlockHeader {
+                        header: aureum_node::core::BlockHeader {
                             parent_hash: storage_loop.get_block(engine.height - 1).map(|b| b.hash()).unwrap_or_default(),
                             timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
                             height: engine.height,
@@ -456,7 +444,7 @@ async fn main() {
             }
 
             // Decode and Securely Verify Transaction
-            if let Ok(tx) = crate::core::Transaction::decode(&mut &tx_bytes[..]) {
+            if let Ok(tx) = aureum_node::core::Transaction::decode(&mut &tx_bytes[..]) {
                 // Cryptographic Signature Check (Security Roadmap 1.2.F)
                 if !tx.verify_signature() {
                     warn!("Invalid cryptographic signature for transaction from {}", tx.sender);
