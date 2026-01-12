@@ -98,6 +98,33 @@ impl Block {
         let hash_bytes = hasher.finalize();
         hex::encode(hash_bytes)
     }
+
+    pub fn calculate_merkle_root(&self) -> String {
+        if self.transactions.is_empty() {
+            return "0".to_string();
+        }
+        
+        let mut hashes: Vec<Vec<u8>> = self.transactions.iter().map(|tx| {
+            let mut hasher = Keccak256::new();
+            hasher.update(tx.encode());
+            hasher.finalize().to_vec()
+        }).collect();
+
+        while hashes.len() > 1 {
+            if hashes.len() % 2 != 0 {
+                hashes.push(hashes.last().unwrap().clone());
+            }
+            let mut next_level = vec![];
+            for i in (0..hashes.len()).step_by(2) {
+                let mut hasher = Keccak256::new();
+                hasher.update(&hashes[i]);
+                hasher.update(&hashes[i+1]);
+                next_level.push(hasher.finalize().to_vec());
+            }
+            hashes = next_level;
+        }
+        hex::encode(&hashes[0])
+    }
 }
 
 pub fn generate_address(public_key: &[u8]) -> String {

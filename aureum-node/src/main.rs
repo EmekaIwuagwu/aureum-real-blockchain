@@ -105,10 +105,61 @@ async fn main() {
     let val_set = storage.get_validator_set().expect("Fatal: No validator set found");
     let engine = Arc::new(Mutex::new(ConsensusEngine::new(val_set)));
     let vm = Arc::new(AureumVM::new(storage.clone()));
+    let mempool = Arc::new(Mutex::new(Vec::<crate::core::Transaction>::new()));
 
     // Specialized Institutional Engines
     let compliance_engine = Arc::new(Mutex::new(ComplianceEngine::new()));
     let oracle = Arc::new(Mutex::new(AureumOracle::new(vec!["aur1initial_validator_address".to_string()])));
+
+    // Automated Consensus Loop (Priority 1-3 Automation)
+    let engine_loop = engine.clone();
+    let storage_loop = storage.clone();
+    let mempool_loop = mempool.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            let mut engine = engine_loop.lock().await;
+            
+            match engine.step {
+                crate::consensus::BftStep::Propose => {
+                    info!("Consensus: Entering Propose for height {}", engine.height);
+                    // Proposer Logic: If we were the proposer, we'd broadcast a block.
+                    // For now, we simulate proposal acceptance after 2s.
+                    engine.next_step(&storage_loop, None);
+                },
+                crate::consensus::BftStep::Prevote => {
+                    info!("Consensus: Entering Prevote...");
+                    engine.next_step(&storage_loop, None);
+                },
+                crate::consensus::BftStep::Precommit => {
+                    info!("Consensus: Entering Precommit...");
+                    engine.next_step(&storage_loop, None);
+                },
+                crate::consensus::BftStep::Commit => {
+                    info!("Consensus: COMMITTING height {}", engine.height);
+                    
+                    // Create block from mempool
+                    let mut txs = mempool_loop.lock().await;
+                    let current_txs = txs.drain(..).collect::<Vec<_>>();
+                    
+                    let mut block = Block {
+                        header: crate::core::BlockHeader {
+                            parent_hash: storage_loop.get_block(engine.height - 1).map(|b| b.hash()).unwrap_or_default(),
+                            timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+                            height: engine.height,
+                            state_root: "0".to_string(), // Future: Root calculation
+                            tx_merkle_root: "0".to_string(),
+                        },
+                        transactions: current_txs,
+                    };
+                    block.header.tx_merkle_root = block.calculate_merkle_root();
+                    
+                    storage_loop.save_block(&block);
+                    engine.next_step(&storage_loop, Some(&block));
+                }
+            }
+        }
+    });
 
     let mut io = IoHandler::default();
 
@@ -227,9 +278,11 @@ async fn main() {
     // RPC: aureum_sendTransaction
     let tx_broadcaster = tx_sender.clone();
     let vm_compliance = vm.clone();
+    let mempool_rpc = mempool.clone();
     io.add_method("aureum_sendTransaction", move |params: Params| {
         let broadcaster = tx_broadcaster.clone();
         let vm = vm_compliance.clone();
+        let mempool = mempool_rpc.clone();
         async move {
             let tx_hex: String = params.parse().expect("Invalid transaction hex");
             let tx_bytes = hex::decode(tx_hex.replace("0x", "")).expect("Invalid hex");
@@ -238,6 +291,13 @@ async fn main() {
             if !vm.verify_compliance(&tx_bytes) {
                 warn!("Compliance check failed for transaction broadcast");
                 return Err(jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Compliance Verification Failed"));
+            }
+
+            // Decode Transaction (Simplified for version 1)
+            if let Ok(tx) = crate::core::Transaction::decode(&mut &tx_bytes[..]) {
+                let mut pool = mempool.lock().await;
+                pool.push(tx);
+                info!("Transaction entered institutional mempool. Total: {}", pool.len());
             }
 
             if let Err(e) = broadcaster.send(tx_bytes).await {

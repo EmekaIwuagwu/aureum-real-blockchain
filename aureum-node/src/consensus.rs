@@ -36,13 +36,40 @@ pub struct ConsensusEngine {
 impl ConsensusEngine {
     pub fn new(validator_set: ValidatorSet) -> Self {
         Self {
-            height: 1,
+            height: 1, // Start after Genesis
             round: 0,
             step: BftStep::Propose,
             validator_set,
             votes: HashMap::new(),
             authority_veto_active: true, // Default to true for Aureum compliance
         }
+    }
+
+    /// Deterministic stake-weighted Proposer selection (Priority 1)
+    pub fn select_proposer(&self) -> String {
+        if self.validator_set.validators.is_empty() {
+            return "".to_string();
+        }
+
+        // Sort by address for deterministic results
+        let mut sorted_vals = self.validator_set.validators.clone();
+        sorted_vals.sort_by(|a, b| a.address.cmp(&b.address));
+
+        // Round-robin index based on height and round
+        let total_stake = self.validator_set.total_stake;
+        if total_stake == 0 { return sorted_vals[0].address.clone(); }
+
+        let index_seed = (self.height + self.round as u64) % total_stake;
+        let mut current_sum = 0;
+
+        for val in sorted_vals {
+            current_sum += val.stake;
+            if index_seed < current_sum {
+                return val.address;
+            }
+        }
+
+        self.validator_set.validators[0].address.clone()
     }
 
     pub fn process_message(&mut self, msg: BftMessage) {
