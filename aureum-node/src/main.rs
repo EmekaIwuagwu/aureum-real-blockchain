@@ -204,7 +204,27 @@ async fn main() {
                                         info!("VISA APPLICATION SUBMITTED: Applicant {} for Property {}", app.applicant, app.property_id);
                                     }
                                 }
-                            }
+                            },
+                            crate::core::TransactionType::ContractCreate { ref bytecode } => {
+                                // Institutional execution of Solidity/Quorlin Bytecode
+                                match vm_loop.execute_transaction(&tx.sender, "0x0000000000000000000000000000000000000000", bytecode.clone(), tx.amount) {
+                                    Ok(_) => {
+                                        storage_loop.increment_nonce(&tx.sender);
+                                        info!("CONTRACT DEPLOYED by {}", tx.sender);
+                                    },
+                                    Err(e) => warn!("Contract deployment failed: {}", e),
+                                }
+                            },
+                            crate::core::TransactionType::ContractCall { ref target, ref data } => {
+                                // Institutional interaction with smart contract state
+                                match vm_loop.execute_transaction(&tx.sender, target, data.clone(), tx.amount) {
+                                    Ok(_) => {
+                                        storage_loop.increment_nonce(&tx.sender);
+                                        info!("CONTRACT CALL successful to {} from {}", target, tx.sender);
+                                    },
+                                    Err(e) => warn!("Contract call failed: {}", e),
+                                }
+                            },
                             _ => {
                                 // Default increment for other types to prevent stuck mempool
                                 storage_loop.increment_nonce(&tx.sender);
@@ -218,7 +238,7 @@ async fn main() {
                             parent_hash: storage_loop.get_block(engine.height - 1).map(|b| b.hash()).unwrap_or_default(),
                             timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
                             height: engine.height,
-                            state_root: "0".to_string(), 
+                            state_root: storage_loop.calculate_state_root(), 
                             tx_merkle_root: "0".to_string(),
                         },
                         transactions: current_txs,

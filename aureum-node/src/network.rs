@@ -60,8 +60,10 @@ impl P2PNetwork {
 
                 let gossipsub_config = gossipsub::ConfigBuilder::default()
                     .heartbeat_interval(Duration::from_secs(10))
-                    .validation_mode(gossipsub::ValidationMode::Strict)
+                    .validation_mode(gossipsub::ValidationMode::Strict) // Mandatory for Security Roadmap 1.2.A
                     .message_id_fn(message_id_fn)
+                    .max_transmit_size(10 * 1024 * 1024) // 10MB limit for institutional blocks
+                    .duplicate_cache_time(Duration::from_secs(60))
                     .build()
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 

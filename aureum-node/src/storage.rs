@@ -116,6 +116,29 @@ impl ChainStorage {
         self.db.get(format!("visa:{}", applicant).as_bytes()).ok()?.and_then(|data| crate::core::VisaApplication::decode(&mut &data[..]).ok())
     }
 
+    /// Calculate Deterministic State Root (Section 1.2.E)
+    pub fn calculate_state_root(&self) -> String {
+        use sha3::{Digest, Keccak256};
+        let mut hasher = Keccak256::new();
+        
+        // Institutional hack: Iterate over all keys starting with 'balance:' and 'property:'
+        // For production, this would use a Merkle Patricia Trie
+        for item in self.db.scan_prefix(b"balance:") {
+            if let Ok((k, v)) = item {
+                hasher.update(k);
+                hasher.update(v);
+            }
+        }
+        for item in self.db.scan_prefix(b"property:") {
+            if let Ok((k, v)) = item {
+                hasher.update(k);
+                hasher.update(v);
+            }
+        }
+        
+        hex::encode(hasher.finalize())
+    }
+
     // --- Nonce Management (Section 1.2.C) ---
 
     pub fn get_nonce(&self, address: &str) -> u64 {

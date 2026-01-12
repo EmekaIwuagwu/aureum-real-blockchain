@@ -24,6 +24,8 @@ pub enum TransactionType {
     TokenizeProperty { address: String, metadata: String },
     IdentityUpdate { did: String },
     ApplyForVisa { property_id: String, program: VisaProgram },
+    ContractCreate { bytecode: Vec<u8> },              // Deploy Solidity/Quorlin contract
+    ContractCall { target: String, data: Vec<u8> },    // Interact with institutional logic
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode, PartialEq)]
