@@ -88,12 +88,12 @@ async fn main() {
         storage.update_balance("aur1initial_validator_address", 1_000_000);
         
         // Initialize Test Accounts for Wallet Demo
-        storage.update_balance("genesis", 10_000_000_000); // Treasury - 10B AUR
+        storage.update_balance("genesis", 200_000_000_000); // Treasury - 200B AUR
         storage.update_balance("alice", 1_000_000); // Test user - 1M AUR
         storage.update_balance("bob", 1_000_000); // Test user - 1M AUR
         storage.update_balance("charlie", 500_000); // Test user - 500K AUR
         storage.update_balance("diana", 500_000); // Test user - 500K AUR
-        info!("Initialized test accounts: genesis, alice, bob, charlie, diana");
+        info!("Initialized test accounts: genesis (200B), alice, bob, charlie, diana");
 
         // Initialize Global State
         let initial_state = crate::core::ChainState {
