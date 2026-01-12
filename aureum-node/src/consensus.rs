@@ -192,6 +192,7 @@ impl ConsensusEngine {
                 let penalty = (validator.stake as f64 * 0.01) as u64; // 1% slash for downtime
                 validator.stake -= penalty;
                 self.validator_set.total_stake -= penalty;
+                storage.update_balance(&validator.address, storage.get_balance(&validator.address).saturating_sub(penalty));
                 slashed = true;
                 warn!("Slashing validator {} for downtime: -{} AUR", validator.address, penalty);
             }
@@ -199,6 +200,30 @@ impl ConsensusEngine {
 
         if slashed {
             storage.save_validator_set(&self.validator_set);
+        }
+    }
+
+    /// Detect Double Signing (Equivocation) (Section 1.2.B)
+    pub fn detect_equivocation(&mut self, msg: &BftMessage, storage: &crate::storage::ChainStorage) -> bool {
+        let step_votes = self.votes.get(&msg.step).cloned().unwrap_or_default();
+        for vote in step_votes {
+            if vote.validator == msg.validator && vote.block_hash != msg.block_hash {
+                error!("Equivocation detected! Validator {} signed conflicting blocks at height {}", msg.validator, msg.height);
+                self.slash_validator(&msg.validator, 0.50, storage); // 50% slash for malicious equivocation
+                return true;
+            }
+        }
+        false
+    }
+
+    fn slash_validator(&mut self, address: &str, percentage: f64, storage: &crate::storage::ChainStorage) {
+        if let Some(validator) = self.validator_set.validators.iter_mut().find(|v| v.address == address) {
+            let penalty = (validator.stake as f64 * percentage) as u64;
+            validator.stake = validator.stake.saturating_sub(penalty);
+            self.validator_set.total_stake = self.validator_set.total_stake.saturating_sub(penalty);
+            storage.update_balance(address, storage.get_balance(address).saturating_sub(penalty));
+            storage.save_validator_set(&self.validator_set);
+            warn!("CRITICAL: Slashing validator {} for malicious behavior: -{} AUR", address, penalty);
         }
     }
 }

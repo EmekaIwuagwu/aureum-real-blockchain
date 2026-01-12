@@ -115,4 +115,24 @@ impl ChainStorage {
     pub fn get_visa_application(&self, applicant: &str) -> Option<crate::core::VisaApplication> {
         self.db.get(format!("visa:{}", applicant).as_bytes()).ok()?.and_then(|data| crate::core::VisaApplication::decode(&mut &data[..]).ok())
     }
+
+    // --- Nonce Management (Section 1.2.C) ---
+
+    pub fn get_nonce(&self, address: &str) -> u64 {
+        let key = format!("nonce:{}", address);
+        match self.db.get(key.as_bytes()).ok().flatten() {
+            Some(data) => {
+                let mut bytes = [0u8; 8];
+                bytes.copy_from_slice(&data);
+                u64::from_be_bytes(bytes)
+            },
+            None => 0,
+        }
+    }
+
+    pub fn increment_nonce(&self, address: &str) {
+        let current = self.get_nonce(address);
+        let key = format!("nonce:{}", address);
+        self.db.insert(key.as_bytes(), &(current + 1).to_be_bytes()).expect("Sled error");
+    }
 }

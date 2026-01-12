@@ -145,6 +145,13 @@ async fn main() {
                     
                     // 2. Execute Transactions in AVM
                     for tx in &current_txs {
+                        // Anti-Replay Protection (Section 1.2.C)
+                        let current_nonce = storage_loop.get_nonce(&tx.sender);
+                        if tx.nonce != current_nonce {
+                            warn!("Skipping transaction from {}: Invalid nonce (Expected {}, Got {})", tx.sender, current_nonce, tx.nonce);
+                            continue;
+                        }
+
                         match tx.tx_type {
                             crate::core::TransactionType::Transfer => {
                                 let balance_from = storage_loop.get_balance(&tx.sender);
@@ -152,21 +159,22 @@ async fn main() {
                                     storage_loop.update_balance(&tx.sender, balance_from - (tx.amount + tx.fee));
                                     let balance_to = storage_loop.get_balance(&tx.receiver);
                                     storage_loop.update_balance(&tx.receiver, balance_to + tx.amount);
+                                    storage_loop.increment_nonce(&tx.sender);
                                 }
                             },
-                            crate::core::TransactionType::TokenizeProperty { address, metadata } => {
+                            crate::core::TransactionType::TokenizeProperty { ref address, ref metadata } => {
                                 // Phase 2 MVP: Create persistent property record
                                 let prop = crate::core::Property {
                                     id: format!("prop_{}", tx.nonce),
                                     owner: tx.sender.clone(),
                                     co_owners: vec![],
                                     jurisdiction: "Portugal".to_string(), // Default for Phase 1
-                                    legal_description: address,
+                                    legal_description: address.clone(),
                                     coordinates: (0.0, 0.0),
                                     valuation_eur: tx.amount,
                                     valuation_timestamp: block.header.timestamp,
                                     valuation_oracle: "system".to_string(),
-                                    title_deed_hash: metadata,
+                                    title_deed_hash: metadata.clone(),
                                     survey_hash: "".to_string(),
                                     visa_program_eligible: true,
                                     minimum_investment_met: tx.amount >= 500_000, // 500k threshold
@@ -176,6 +184,7 @@ async fn main() {
                                     liens: vec![],
                                 };
                                 storage_loop.save_property(&prop);
+                                storage_loop.increment_nonce(&tx.sender);
                                 info!("PROPERTY REGISTERED: {} (Owner: {})", prop.id, prop.owner);
                             },
                             crate::core::TransactionType::ApplyForVisa { ref property_id, ref program } => {
@@ -191,11 +200,15 @@ async fn main() {
                                             timestamp: block.header.timestamp,
                                         };
                                         storage_loop.save_visa_application(&app);
+                                        storage_loop.increment_nonce(&tx.sender);
                                         info!("VISA APPLICATION SUBMITTED: Applicant {} for Property {}", app.applicant, app.property_id);
                                     }
                                 }
                             }
-                            _ => {}
+                            _ => {
+                                // Default increment for other types to prevent stuck mempool
+                                storage_loop.increment_nonce(&tx.sender);
+                            }
                         }
                     }
 
