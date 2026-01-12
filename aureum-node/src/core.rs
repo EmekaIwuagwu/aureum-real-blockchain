@@ -26,6 +26,22 @@ pub enum TransactionType {
     ApplyForVisa { property_id: String, program: VisaProgram },
     ContractCreate { bytecode: Vec<u8> },              // Deploy Solidity/Quorlin contract
     ContractCall { target: String, data: Vec<u8> },    // Interact with institutional logic
+    
+    // Advanced Property Ops (Section 1.3.A)
+    AddMortgage { property_id: String, details: String },
+    ReleaseLien { property_id: String, lien_id: String },
+    TransferFraction { property_id: String, to: String, basis_points: u64 },
+    
+    // Multi-Sig / Governance (Section 1.2.D)
+    CreateMultiSig { owners: Vec<String>, threshold: u8 },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
+pub struct MultiSigAccount {
+    pub address: String,
+    pub owners: Vec<String>,
+    pub threshold: u8,
+    pub nonce: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode, PartialEq)]

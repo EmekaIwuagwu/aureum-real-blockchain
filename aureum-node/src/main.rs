@@ -225,6 +225,49 @@ async fn main() {
                                     Err(e) => warn!("Contract call failed: {}", e),
                                 }
                             },
+                            // Advanced Property Operations
+                            crate::core::TransactionType::AddMortgage { ref property_id, ref details } => {
+                                if let Some(mut prop) = storage_loop.get_property(property_id) {
+                                    if prop.owner == tx.sender {
+                                        prop.mortgages.push(details.clone());
+                                        storage_loop.save_property(&prop);
+                                        storage_loop.increment_nonce(&tx.sender);
+                                        info!("MORTGAGE ADDED to Property {}", property_id);
+                                    }
+                                }
+                            },
+                            crate::core::TransactionType::ReleaseLien { ref property_id, ref lien_id } => {
+                                if let Some(mut prop) = storage_loop.get_property(property_id) {
+                                    // In a real implementation, this would require authority/lender signature
+                                    prop.liens.retain(|l| l != lien_id);
+                                    storage_loop.save_property(&prop);
+                                    storage_loop.increment_nonce(&tx.sender);
+                                    info!("LIEN RELEASED for Property {}", property_id);
+                                }
+                            },
+                            crate::core::TransactionType::TransferFraction { ref property_id, ref to, basis_points } => {
+                                if let Some(mut prop) = storage_loop.get_property(property_id) {
+                                    if prop.owner == tx.sender {
+                                        prop.co_owners.push((to.clone(), basis_points));
+                                        storage_loop.save_property(&prop);
+                                        storage_loop.increment_nonce(&tx.sender);
+                                        info!("FRACTIONAL TRANSFER: {} bps of {} to {}", basis_points, property_id, to);
+                                    }
+                                }
+                            },
+                            // Multi-Sig Creation
+                            crate::core::TransactionType::CreateMultiSig { ref owners, threshold } => {
+                                let ms_address = crate::core::generate_address(tx.sender.as_bytes()); // Deterministic generation hack
+                                let ms_account = crate::core::MultiSigAccount {
+                                    address: ms_address.clone(),
+                                    owners: owners.clone(),
+                                    threshold,
+                                    nonce: 0,
+                                };
+                                storage_loop.save_multisig(&ms_account);
+                                storage_loop.increment_nonce(&tx.sender);
+                                info!("MULTISIG CREATED: {} (Threshold: {}/{})", ms_address, threshold, owners.len());
+                            },
                             _ => {
                                 // Default increment for other types to prevent stuck mempool
                                 storage_loop.increment_nonce(&tx.sender);

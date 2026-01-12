@@ -158,4 +158,15 @@ impl ChainStorage {
         let key = format!("nonce:{}", address);
         self.db.insert(key.as_bytes(), &(current + 1).to_be_bytes()).expect("Sled error");
     }
+
+    // --- Multi-Sig Storage (Section 1.2.D) ---
+
+    pub fn save_multisig(&self, account: &crate::core::MultiSigAccount) {
+        let encoded = account.encode();
+        self.db.insert(format!("multisig:{}", account.address).as_bytes(), encoded).expect("Failed to save multisig");
+    }
+
+    pub fn get_multisig(&self, address: &str) -> Option<crate::core::MultiSigAccount> {
+        self.db.get(format!("multisig:{}", address).as_bytes()).ok()?.and_then(|data| crate::core::MultiSigAccount::decode(&mut &data[..]).ok())
+    }
 }
