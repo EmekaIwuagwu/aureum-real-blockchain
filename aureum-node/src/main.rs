@@ -154,8 +154,30 @@ async fn main() {
                                     storage_loop.update_balance(&tx.receiver, balance_to + tx.amount);
                                 }
                             },
-                            // EVM / Quorlin Execution 
-                            // This would be triggered by a specific tx_type soon
+                            crate::core::TransactionType::TokenizeProperty { address, metadata } => {
+                                // Phase 2 MVP: Create persistent property record
+                                let prop = crate::core::Property {
+                                    id: format!("prop_{}", tx.nonce),
+                                    owner: tx.sender.clone(),
+                                    co_owners: vec![],
+                                    jurisdiction: "Portugal".to_string(), // Default for Phase 1
+                                    legal_description: address,
+                                    coordinates: (0.0, 0.0),
+                                    valuation_eur: tx.amount,
+                                    valuation_timestamp: block.header.timestamp,
+                                    valuation_oracle: "system".to_string(),
+                                    title_deed_hash: metadata,
+                                    survey_hash: "".to_string(),
+                                    visa_program_eligible: true,
+                                    minimum_investment_met: tx.amount >= 500_000, // 500k threshold
+                                    kyc_status: 1,
+                                    aml_cleared: true,
+                                    mortgages: vec![],
+                                    liens: vec![],
+                                };
+                                storage_loop.save_property(&prop);
+                                info!("PROPERTY REGISTERED: {} (Owner: {})", prop.id, prop.owner);
+                            }
                             _ => {}
                         }
                     }
@@ -296,6 +318,19 @@ async fn main() {
         }
     });
 
+    // RPC: aureum_getProperty (Part 4.2.B)
+    let storage_prop = storage.clone();
+    io.add_method("aureum_getProperty", move |params: Params| {
+        let storage = storage_prop.clone();
+        async move {
+            let id: String = params.parse().expect("Invalid property ID");
+            match storage.get_property(&id) {
+                Some(p) => Ok(serde_json::to_value(p).unwrap()),
+                None => Ok(Value::Null),
+            }
+        }
+    });
+
     // RPC: aureum_sendTransaction
     let tx_broadcaster = tx_sender.clone();
     let vm_compliance = vm.clone();
@@ -314,11 +349,19 @@ async fn main() {
                 return Err(jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Compliance Verification Failed"));
             }
 
-            // Decode Transaction (Simplified for version 1)
+            // Decode and Securely Verify Transaction
             if let Ok(tx) = crate::core::Transaction::decode(&mut &tx_bytes[..]) {
+                // Cryptographic Signature Check (Security Roadmap 1.2.F)
+                if !tx.verify_signature() {
+                    warn!("Invalid cryptographic signature for transaction from {}", tx.sender);
+                    return Err(jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Invalid Cryptographic Signature"));
+                }
+
                 let mut pool = mempool.lock().await;
                 pool.push(tx);
-                info!("Transaction entered institutional mempool. Total: {}", pool.len());
+                info!("Transaction verified and entered mempool. Total: {}", pool.len());
+            } else {
+                return Err(jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Transaction Decoding Failed"));
             }
 
             if let Err(e) = broadcaster.send(tx_bytes).await {

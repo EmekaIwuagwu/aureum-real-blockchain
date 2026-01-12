@@ -25,6 +25,35 @@ pub enum TransactionType {
     IdentityUpdate { did: String },
 }
 
+impl Transaction {
+    pub fn verify_signature(&self) -> bool {
+        use ed25519_dalek::{VerifyingKey, Signature, Verifier};
+        
+        // Remove aur1 prefix and treat as hex for public key
+        let pub_key_res = hex::decode(self.sender.replace("aur1", ""));
+        let Ok(public_key_bytes) = pub_key_res else { return false; };
+        if public_key_bytes.len() != 32 { return false; }
+        
+        let Ok(public_key) = VerifyingKey::from_bytes(&public_key_bytes.try_into().unwrap_or([0u8; 32])) else {
+            return false;
+        };
+
+        let mut msg = Vec::new();
+        msg.extend_from_slice(self.sender.as_bytes());
+        msg.extend_from_slice(self.receiver.as_bytes());
+        msg.extend_from_slice(&self.amount.to_be_bytes());
+        msg.extend_from_slice(&self.nonce.to_be_bytes());
+        msg.extend_from_slice(&self.fee.to_be_bytes());
+        msg.extend_from_slice(&self.tx_type.encode());
+
+        let Ok(sig) = Signature::from_slice(&self.signature) else {
+            return false;
+        };
+
+        public_key.verify(&msg, &sig).is_ok()
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
 pub struct ChainState {
     pub total_supply: u64,
@@ -132,4 +161,39 @@ pub fn generate_address(public_key: &[u8]) -> String {
     hasher.update(public_key);
     let result = hasher.finalize();
     format!("aur1{}", hex::encode(&result[..20]))
+}
+
+// --- Institutional Property Asset Model (Part 1.3) ---
+
+#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
+pub struct Property {
+    pub id: String,                 // PropertyId (UUID or sequential)
+    pub owner: String,              // Primary Owner Address
+    pub co_owners: Vec<(String, u64)>, // Fractional ownership (Address, StakeBasisPoints)
+    
+    // Legal & location
+    pub jurisdiction: String,       // e.g., "Portugal", "UAE"
+    pub legal_description: String,
+    pub coordinates: (f64, f64),    // (Latitude, Longitude)
+    
+    // Valuation
+    pub valuation_eur: u64,
+    pub valuation_timestamp: u64,
+    pub valuation_oracle: String,
+    
+    // Documentation (Hashes)
+    pub title_deed_hash: String,
+    pub survey_hash: String,
+    
+    // Visa program
+    pub visa_program_eligible: bool,
+    pub minimum_investment_met: bool,
+    
+    // Compliance
+    pub kyc_status: u8,             // 0: None, 1: Verified
+    pub aml_cleared: bool,
+    
+    // Encumbrances
+    pub mortgages: Vec<String>,     // Document hashes of mortgages
+    pub liens: Vec<String>,
 }

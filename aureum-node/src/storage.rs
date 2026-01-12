@@ -92,4 +92,15 @@ impl ChainStorage {
         let key = format!("storage:{:x?}:{:x?}", address, slot);
         self.db.insert(key.as_bytes(), &value[..]).expect("Sled error");
     }
+
+    // --- Property Registry ---
+
+    pub fn save_property(&self, property: &crate::core::Property) {
+        let encoded = property.encode();
+        self.db.insert(format!("property:{}", property.id).as_bytes(), encoded).expect("Failed to save property");
+    }
+
+    pub fn get_property(&self, id: &str) -> Option<crate::core::Property> {
+        self.db.get(format!("property:{}", id).as_bytes()).ok()?.and_then(|data| crate::core::Property::decode(&mut &data[..]).ok())
+    }
 }
