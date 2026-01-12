@@ -115,39 +115,58 @@ async fn main() {
     let engine_loop = engine.clone();
     let storage_loop = storage.clone();
     let mempool_loop = mempool.clone();
+    let vm_loop = vm.clone();
+    
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await; // 3s per step
             let mut engine = engine_loop.lock().await;
             
             match engine.step {
                 crate::consensus::BftStep::Propose => {
-                    info!("Consensus: Entering Propose for height {}", engine.height);
-                    // Proposer Logic: If we were the proposer, we'd broadcast a block.
-                    // For now, we simulate proposal acceptance after 2s.
+                    let proposer = engine.select_proposer();
+                    info!("Consensus [Height {}]: Proposer {} proposing block...", engine.height, proposer);
                     engine.next_step(&storage_loop, None);
                 },
                 crate::consensus::BftStep::Prevote => {
-                    info!("Consensus: Entering Prevote...");
+                    info!("Consensus [Height {}]: Aggregating Pre-votes...", engine.height);
                     engine.next_step(&storage_loop, None);
                 },
                 crate::consensus::BftStep::Precommit => {
-                    info!("Consensus: Entering Precommit...");
+                    info!("Consensus [Height {}]: Finalizing Pre-commits...", engine.height);
                     engine.next_step(&storage_loop, None);
                 },
                 crate::consensus::BftStep::Commit => {
-                    info!("Consensus: COMMITTING height {}", engine.height);
+                    info!("Consensus [Height {}]: COMMITTING to state...", engine.height);
                     
-                    // Create block from mempool
-                    let mut txs = mempool_loop.lock().await;
-                    let current_txs = txs.drain(..).collect::<Vec<_>>();
+                    // 1. Process Mempool
+                    let mut txs_lock = mempool_loop.lock().await;
+                    let current_txs = txs_lock.drain(..).collect::<Vec<_>>();
                     
+                    // 2. Execute Transactions in AVM
+                    for tx in &current_txs {
+                        match tx.tx_type {
+                            crate::core::TransactionType::Transfer => {
+                                let balance_from = storage_loop.get_balance(&tx.sender);
+                                if balance_from >= tx.amount + tx.fee {
+                                    storage_loop.update_balance(&tx.sender, balance_from - (tx.amount + tx.fee));
+                                    let balance_to = storage_loop.get_balance(&tx.receiver);
+                                    storage_loop.update_balance(&tx.receiver, balance_to + tx.amount);
+                                }
+                            },
+                            // EVM / Quorlin Execution 
+                            // This would be triggered by a specific tx_type soon
+                            _ => {}
+                        }
+                    }
+
+                    // 3. Construct and Save Block
                     let mut block = Block {
                         header: crate::core::BlockHeader {
                             parent_hash: storage_loop.get_block(engine.height - 1).map(|b| b.hash()).unwrap_or_default(),
                             timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
                             height: engine.height,
-                            state_root: "0".to_string(), // Future: Root calculation
+                            state_root: "0".to_string(), 
                             tx_merkle_root: "0".to_string(),
                         },
                         transactions: current_txs,
@@ -155,6 +174,8 @@ async fn main() {
                     block.header.tx_merkle_root = block.calculate_merkle_root();
                     
                     storage_loop.save_block(&block);
+                    
+                    // 4. Finalize height in engine
                     engine.next_step(&storage_loop, Some(&block));
                 }
             }
