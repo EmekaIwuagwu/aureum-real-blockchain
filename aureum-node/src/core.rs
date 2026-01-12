@@ -23,6 +23,33 @@ pub enum TransactionType {
     Burn { amount: u64 }, // Intentional burning
     TokenizeProperty { address: String, metadata: String },
     IdentityUpdate { did: String },
+    ApplyForVisa { property_id: String, program: VisaProgram },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode, PartialEq)]
+pub enum VisaProgram {
+    Portugal,
+    Spain,
+    Greece,
+    UAE,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode, PartialEq)]
+pub enum ApplicationStatus {
+    Pending,
+    Verified,
+    Approved,
+    Rejected,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
+pub struct VisaApplication {
+    pub applicant: String,
+    pub property_id: String,
+    pub investment_amount: u64,
+    pub program: VisaProgram,
+    pub status: ApplicationStatus,
+    pub timestamp: u64,
 }
 
 impl Transaction {

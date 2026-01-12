@@ -103,4 +103,16 @@ impl ChainStorage {
     pub fn get_property(&self, id: &str) -> Option<crate::core::Property> {
         self.db.get(format!("property:{}", id).as_bytes()).ok()?.and_then(|data| crate::core::Property::decode(&mut &data[..]).ok())
     }
+
+    // --- Golden Visa Applications ---
+
+    pub fn save_visa_application(&self, app: &crate::core::VisaApplication) {
+        let encoded = app.encode();
+        // Indexed by applicant because a user usually tracks their own visa status
+        self.db.insert(format!("visa:{}", app.applicant).as_bytes(), encoded).expect("Failed to save visa application");
+    }
+
+    pub fn get_visa_application(&self, applicant: &str) -> Option<crate::core::VisaApplication> {
+        self.db.get(format!("visa:{}", applicant).as_bytes()).ok()?.and_then(|data| crate::core::VisaApplication::decode(&mut &data[..]).ok())
+    }
 }

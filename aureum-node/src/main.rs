@@ -177,6 +177,23 @@ async fn main() {
                                 };
                                 storage_loop.save_property(&prop);
                                 info!("PROPERTY REGISTERED: {} (Owner: {})", prop.id, prop.owner);
+                            },
+                            crate::core::TransactionType::ApplyForVisa { ref property_id, ref program } => {
+                                // Phase 2: Link property ownership to visa application
+                                if let Some(prop) = storage_loop.get_property(property_id) {
+                                    if prop.owner == tx.sender {
+                                        let app = crate::core::VisaApplication {
+                                            applicant: tx.sender.clone(),
+                                            property_id: property_id.clone(),
+                                            investment_amount: prop.valuation_eur,
+                                            program: program.clone(),
+                                            status: crate::core::ApplicationStatus::Pending,
+                                            timestamp: block.header.timestamp,
+                                        };
+                                        storage_loop.save_visa_application(&app);
+                                        info!("VISA APPLICATION SUBMITTED: Applicant {} for Property {}", app.applicant, app.property_id);
+                                    }
+                                }
                             }
                             _ => {}
                         }
@@ -326,6 +343,19 @@ async fn main() {
             let id: String = params.parse().expect("Invalid property ID");
             match storage.get_property(&id) {
                 Some(p) => Ok(serde_json::to_value(p).unwrap()),
+                None => Ok(Value::Null),
+            }
+        }
+    });
+
+    // RPC: aureum_getVisaStatus (Section 1.3.B)
+    let storage_visa = storage.clone();
+    io.add_method("aureum_getVisaStatus", move |params: Params| {
+        let storage = storage_visa.clone();
+        async move {
+            let applicant: String = params.parse().expect("Invalid applicant address");
+            match storage.get_visa_application(&applicant) {
+                Some(v) => Ok(serde_json::to_value(v).unwrap()),
                 None => Ok(Value::Null),
             }
         }
