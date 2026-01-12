@@ -1,5 +1,5 @@
 use revm::{
-    primitives::{Address, U256, AccountInfo, Bytecode, B256, HashMap, TxEnv, Env, TransactTo},
+    primitives::{Address, U256, AccountInfo, Bytecode, B256, HashMap, Account},
     Database,
     DatabaseCommit,
 };
@@ -76,7 +76,7 @@ impl AureumVM {
 
     /// Execute and COMMIT a transaction to the persistent blockchain state
     /// Simplified implementation - full EVM integration pending
-    pub fn execute_transaction(&self, caller: &str, target: &str, data: Vec<u8>, value: u64) -> Result<Vec<u8>, String> {
+    pub fn execute_transaction(&self, _caller: &str, target: &str, data: Vec<u8>, _value: u64) -> Result<Vec<u8>, String> {
         // For now, this is a placeholder that allows the node to compile
         // Full revm integration requires:
         // 1. Proper Builder pattern for EVM in revm 3.x
@@ -87,7 +87,7 @@ impl AureumVM {
         if target == "0x0000000000000000000000000000000000000000" {
             // Contract deployment
             let contract_addr = crate::core::generate_address(&data);
-            let mut db = AureumDB { storage: self.storage.clone() };
+            let db = AureumDB { storage: self.storage.clone() };
             
             // Store bytecode
             if let Ok(addr_bytes) = hex::decode(contract_addr.trim_start_matches("0x")) {
