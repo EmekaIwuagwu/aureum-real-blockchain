@@ -1,0 +1,901 @@
+"use client";
+
+import React, { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Plus, LogIn, Key, Shield, ArrowRight, Wallet,
+  Send, Home, Settings, LogOut, Copy, RefreshCcw,
+  Eye, EyeOff, CheckCircle2, ChevronRight, Globe,
+  Phone, User, MapPin, Building2, ExternalLink, QrCode,
+  Search, Filter, CreditCard, Landmark, Check
+} from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+
+type AppStep = "landing" | "signup" | "mnemonic_show" | "mnemonic_verify" | "login" | "dashboard";
+
+interface Property {
+  id: string;
+  name: string;
+  location: string;
+  price: string;
+  yield: string;
+  landlord: string;
+  phone: string;
+  description: string;
+  image: string;
+}
+
+const PROPERTIES: Property[] = [
+  {
+    id: "prop_1",
+    name: "Golden Palace Lisbon",
+    location: "Avenida da Liberdade, Lisbon",
+    price: "€500,000",
+    yield: "5.4%",
+    landlord: "Ricardo Silva",
+    phone: "+351 912 345 678",
+    description: "Ultra-luxury penthouse with panoramic views of the Tagus River. High-performance rental yields with Golden Visa eligibility.",
+    image: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&q=80&w=800"
+  },
+  {
+    id: "prop_2",
+    name: "Azure Porto Heights",
+    location: "Ribeira District, Porto",
+    price: "€350,000",
+    yield: "6.1%",
+    landlord: "Maria Fernandez",
+    phone: "+351 934 567 890",
+    description: "Modern architectural marvel in the heart of Porto's historic district. Includes full property management services.",
+    image: "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&q=80&w=800"
+  },
+  {
+    id: "prop_3",
+    name: "Algarve Beachfront Villa",
+    location: "Vilamoura, Algarve",
+    price: "€1,200,000",
+    yield: "4.2%",
+    landlord: "João Pereira",
+    phone: "+351 922 888 777",
+    description: "Exclusive beachfront property with private access and sustainable energy systems. Top-tier institutional asset.",
+    image: "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&q=80&w=800"
+  }
+];
+
+export default function AureumWallet() {
+  const [step, setStep] = useState<AppStep>("landing");
+  const [password, setPassword] = useState("");
+  const [mnemonic, setMnemonic] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState("assets");
+  const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
+  const [showPK, setShowPK] = useState(false);
+  const [rpcServer, setRpcServer] = useState("http://127.0.0.1:3030");
+  const [isSending, setIsSending] = useState(false);
+  const [isReceiving, setIsReceiving] = useState(false);
+  const [isPayingEscrow, setIsPayingEscrow] = useState(false);
+  const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
+  const [passwordInput, setPasswordInput] = useState("");
+  const [showPKWarning, setShowPKWarning] = useState(false);
+  const [walletAddress] = useState("A" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15));
+  const [showAllTransactions, setShowAllTransactions] = useState(false);
+  const [selectedMarket, setSelectedMarket] = useState<string | null>(null);
+
+  useEffect(() => {
+    const words = "luxury asset golden visa chain property secure investment global portal premium speed liquidity".split(" ");
+    setMnemonic(words.sort(() => Math.random() - 0.5).slice(0, 12));
+  }, []);
+
+  const handleLogout = () => {
+    setStep("landing");
+    setPassword("");
+    setSelectedProperty(null);
+  };
+
+  const handleEscrowPay = () => {
+    setIsPayingEscrow(true);
+    setTimeout(() => {
+      setIsPayingEscrow(false);
+      setPaymentSuccess(true);
+      setTimeout(() => setPaymentSuccess(false), 3000);
+    }, 2500);
+  };
+
+  const handleExportPK = () => {
+    setShowPasswordPrompt(true);
+  };
+
+  const handlePasswordSubmit = () => {
+    if (passwordInput === password) {
+      setShowPasswordPrompt(false);
+      setPasswordInput("");
+      setShowPKWarning(true);
+    } else {
+      alert("Incorrect password");
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#050505] text-white flex flex-col font-inter mesh-gradient">
+      <AnimatePresence mode="wait">
+        {/* LANDING PAGE */}
+        {step === "landing" && (
+          <motion.div
+            key="landing"
+            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
+            className="flex-1 flex flex-col items-center justify-center p-8 text-center"
+          >
+            <div className="mb-10 relative">
+              <motion.div
+                animate={{ rotate: 360 }} transition={{ duration: 60, repeat: Infinity, ease: "linear" }}
+                className="absolute inset-0 bg-red-600/20 blur-[60px] rounded-full scale-150"
+              />
+              <img src="/assets/logo.png" alt="Aureum Logo" className="w-24 h-24 relative z-10" />
+            </div>
+            <h1 className="text-6xl font-bold mb-4 tracking-tighter shimmer-text">AUREUM</h1>
+            <p className="text-gray-400 mb-12 tracking-[0.4em] text-xs uppercase font-medium">Bespoke Real Estate Blockchain</p>
+
+            <div className="w-full max-w-sm space-y-4">
+              <button
+                onClick={() => setStep("signup")}
+                className="btn-primary w-full py-5 text-base"
+              >
+                Create New Wallet
+              </button>
+              <button
+                onClick={() => setStep("login")}
+                className="btn-outline w-full py-5 text-base"
+              >
+                Access Existing Wallet
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* SIGNUP FLOW */}
+        {step === "signup" && (
+          <motion.div
+            key="signup"
+            initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
+            className="flex-1 flex flex-col items-center justify-center p-6"
+          >
+            <div className="w-full max-w-md core-card p-10 glass-panel">
+              <h2 className="text-3xl font-bold mb-4 font-premium">Set Security Key</h2>
+              <p className="text-gray-400 text-sm mb-10 leading-relaxed">This password will be used to unlock your wallet on this machine. Aureum does not store your password.</p>
+
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase tracking-[0.2em] text-gray-500 font-bold">Secure Password</label>
+                  <input
+                    type="password"
+                    className="input-field"
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••••••"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase tracking-[0.2em] text-gray-500 font-bold">Verify Password</label>
+                  <input type="password" placeholder="••••••••••••" className="input-field" />
+                </div>
+                <button
+                  onClick={() => setStep("mnemonic_show")}
+                  disabled={password.length < 8}
+                  className="btn-primary w-full mt-4 disabled:opacity-30 transition-all"
+                >
+                  Confirm & Initialize
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* MNEMONIC SHOW */}
+        {step === "mnemonic_show" && (
+          <motion.div
+            key="mnemonic"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            className="flex-1 flex flex-col items-center justify-center p-6"
+          >
+            <div className="w-full max-w-xl core-card p-10 glass-panel">
+              <div className="flex items-center gap-4 mb-6">
+                <div className="w-12 h-12 rounded-full bg-red-600/10 flex items-center justify-center">
+                  <Shield className="text-red-500" />
+                </div>
+                <h2 className="text-3xl font-bold font-premium">Recovery Phrase</h2>
+              </div>
+              <p className="text-gray-400 text-sm mb-10 leading-relaxed italic">Write these words down on a physical paper. Do not take a screenshot. This is your <span className="text-white font-bold">Universal Key</span> to all your real estate assets.</p>
+
+              <div className="grid grid-cols-3 gap-4 mb-10">
+                {mnemonic.map((word, i) => (
+                  <div key={i} className="mnemonic-chip flex items-center gap-3 py-4 border border-white/5 bg-white/5 rounded-xl">
+                    <span className="text-[10px] text-gray-600 font-bold">{i + 1}</span> {word}
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex gap-4">
+                <button className="btn-outline flex-1 gap-2"><Copy size={16} /> Copy All</button>
+                <button
+                  onClick={() => setStep("dashboard")}
+                  className="btn-primary flex-1"
+                >
+                  Access Dashboard
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* LOGIN PAGE */}
+        {step === "login" && (
+          <motion.div
+            key="login"
+            initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
+            className="flex-1 flex flex-col items-center justify-center p-6"
+          >
+            <div className="w-full max-w-md core-card p-10 glass-panel">
+              <div className="flex flex-col items-center mb-10">
+                <img src="/assets/logo.png" alt="Aureum" className="w-16 h-16 mb-4" />
+                <h2 className="text-3xl font-bold font-premium tracking-tighter">Welcome Back</h2>
+                <p className="text-gray-500 text-sm italic">Unlock your secure vault</p>
+              </div>
+
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase tracking-[0.2em] text-gray-500 font-bold">Safe Password</label>
+                  <input
+                    type="password"
+                    className="input-field"
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && (passwordInput === password || password === "" ? setStep("dashboard") : alert("Invalid password"))}
+                    placeholder="••••••••••••"
+                    autoFocus
+                  />
+                </div>
+                <button
+                  onClick={() => {
+                    if (passwordInput === password || password === "") {
+                      setStep("dashboard");
+                      setPasswordInput("");
+                    } else {
+                      alert("Invalid password");
+                    }
+                  }}
+                  className="btn-primary w-full py-4"
+                >
+                  Unlock Wallet
+                </button>
+                <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-widest text-gray-500 pt-4 border-t border-white/5">
+                  <button onClick={() => setStep("signup")} className="hover:text-red-500 transition-colors">Emergency Recovery</button>
+                  <button onClick={() => setStep("landing")} className="hover:text-white transition-colors">Switch Account</button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* DASHBOARD */}
+        {step === "dashboard" && (
+          <motion.div
+            key="dashboard"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            className="flex-1 flex"
+          >
+            {/* Sidebar */}
+            <aside className="w-72 border-r border-white/5 flex flex-col p-8 glass-panel sticky top-0 h-screen">
+              <div className="flex items-center gap-4 mb-16">
+                <img src="/assets/logo.png" alt="Aureum" className="w-10 h-10" />
+                <h1 className="font-bold tracking-tighter text-2xl font-premium">AUREUM</h1>
+              </div>
+
+              <nav className="flex-1 space-y-3">
+                <SidebarItem icon={<Wallet size={20} />} label="Portfolio" active={activeTab === "assets"} onClick={() => setActiveTab("assets")} />
+                <SidebarItem icon={<Home size={20} />} label="Real Estate" active={activeTab === "real-estate"} onClick={() => setActiveTab("real-estate")} />
+                <SidebarItem icon={<Globe size={20} />} label="Markets" active={activeTab === "markets"} onClick={() => setActiveTab("markets")} />
+                <SidebarItem icon={<Settings size={20} />} label="Settings" active={activeTab === "settings"} onClick={() => setActiveTab("settings")} />
+              </nav>
+
+              <div className="mt-auto space-y-6">
+                <div className="p-4 core-card bg-red-600/5 border-red-500/10">
+                  <div className="text-[10px] text-red-500 font-bold uppercase mb-1">Network Status</div>
+                  <div className="text-xs font-bold text-gray-400">Mainnet v0.1.0 (aur1)</div>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="w-full flex items-center gap-4 text-gray-500 hover:text-red-500 transition-all p-2 group"
+                >
+                  <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" /> <span className="text-sm font-bold uppercase tracking-[0.2em] transition-transform">Logout</span>
+                </button>
+              </div>
+            </aside>
+
+            {/* Main Content Area */}
+            <main className="flex-1 p-10 overflow-y-auto bg-black/40">
+              {activeTab === "assets" && (
+                <div className="max-w-5xl mx-auto">
+                  {/* Hero Balance Section */}
+                  <div className="relative mb-16 p-12 core-card glass-panel overflow-hidden">
+                    <div className="absolute top-0 right-0 w-96 h-96 bg-red-600/10 blur-[100px] -mr-48 -mt-48 rounded-full"></div>
+                    <h2 className="text-xs uppercase tracking-[0.4em] text-gray-500 mb-4 font-bold">Total Asset Valuation</h2>
+                    <h1 className="text-7xl font-bold mb-6 font-premium tracking-tighter flex items-start gap-2">
+                      <span className="text-2xl mt-3 mr-2 font-medium opacity-50">€</span> 1,245,600<span className="text-red-500">.45</span>
+                    </h1>
+                    <div className="flex gap-6 mb-8">
+                      <div className="flex items-center gap-2 text-emerald-500 text-sm font-bold">
+                        <Plus size={16} /> +€12,400 (Last 30d)
+                      </div>
+                    </div>
+                    {/* Wallet Address Display */}
+                    <div className="p-4 bg-white/5 rounded-xl border border-white/5 flex items-center justify-between">
+                      <div>
+                        <div className="text-[10px] uppercase text-gray-500 font-bold mb-1 tracking-widest">Your Wallet Address</div>
+                        <div className="font-mono text-sm text-gray-300">{walletAddress.substring(0, 12)}...{walletAddress.substring(walletAddress.length - 8)}</div>
+                      </div>
+                      <button onClick={() => navigator.clipboard.writeText(walletAddress)} className="text-red-500 hover:text-red-400 transition-all p-2 hover:bg-red-500/10 rounded-lg">
+                        <Copy size={18} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Actions Row */}
+                  <div className="grid grid-cols-2 gap-6 mb-16">
+                    <button
+                      onClick={() => setIsSending(true)}
+                      className="p-8 core-card flex flex-col items-center justify-center gap-4 hover:border-red-500/40 group transition-all"
+                    >
+                      <div className="w-14 h-14 rounded-full bg-red-600/10 flex items-center justify-center group-hover:bg-red-600 group-hover:text-white transition-all text-red-500">
+                        <Send size={28} />
+                      </div>
+                      <span className="text-sm font-bold uppercase tracking-[0.2em]">Send Assets</span>
+                    </button>
+                    <button
+                      onClick={() => setIsReceiving(true)}
+                      className="p-8 core-card flex flex-col items-center justify-center gap-4 hover:border-white/20 transition-all"
+                    >
+                      <div className="w-14 h-14 rounded-full bg-white/5 flex items-center justify-center text-white">
+                        <RefreshCcw size={28} />
+                      </div>
+                      <span className="text-sm font-bold uppercase tracking-[0.2em]">Receive Assets</span>
+                    </button>
+                  </div>
+
+                  {/* Token List */}
+                  <div className="space-y-4 mb-16">
+                    <h3 className="text-[10px] uppercase tracking-[0.4em] text-gray-500 font-bold mb-4">Currency Vault</h3>
+                    <AssetRow symbol="AUR" name="Aureum Governance" balance="1,250.45" value="€2,500.90" />
+                    <AssetRow symbol="USDC" name="Aureum Stablecoin" balance="5,000.00" value="€5,000.00" />
+                  </div>
+
+                  {/* Transaction History */}
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-end mb-6">
+                      <h3 className="text-[10px] uppercase tracking-[0.4em] text-gray-500 font-bold">Recent Transactions</h3>
+                      <button onClick={() => setShowAllTransactions(true)} className="text-[10px] font-bold text-red-500 uppercase tracking-widest hover:text-white transition-colors">View All Transactions</button>
+                    </div>
+                    <TransactionRow
+                      type="received"
+                      from="A8k2n5p...x9m4"
+                      amount="+250.00 AUR"
+                      date="2 hours ago"
+                      status="confirmed"
+                    />
+                    <TransactionRow
+                      type="sent"
+                      to="A3f7h9j...k2p1"
+                      amount="-100.00 AUR"
+                      date="1 day ago"
+                      status="confirmed"
+                    />
+                    <TransactionRow
+                      type="property"
+                      property="Golden Palace Lisbon"
+                      amount="-500,000.00 EUR"
+                      date="3 days ago"
+                      status="escrow"
+                    />
+                    <TransactionRow
+                      type="received"
+                      from="A1b2c3d...e4f5"
+                      amount="+1,000.00 AUR"
+                      date="1 week ago"
+                      status="confirmed"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "real-estate" && !selectedProperty && (
+                <div className="max-w-6xl mx-auto">
+                  <div className="flex justify-between items-end mb-12">
+                    <div>
+                      <h2 className="text-xs uppercase tracking-[0.4em] text-gray-500 mb-2 font-bold">Inventory</h2>
+                      <h1 className="text-5xl font-bold font-premium tracking-tighter italic">Bespoke Listings</h1>
+                    </div>
+                    <div className="flex gap-4">
+                      <div className="relative">
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600" size={16} />
+                        <input placeholder="Filter location..." className="bg-[#121212] border border-white/5 py-3 pl-12 pr-6 rounded-xl text-sm outline-none focus:border-red-500" />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-10">
+                    {PROPERTIES.map(prop => (
+                      <div key={prop.id} onClick={() => setSelectedProperty(prop)} className="cursor-pointer group">
+                        <div className="relative h-80 rounded-3xl overflow-hidden mb-6">
+                          <img src={prop.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
+                          <div className="absolute top-6 right-6 glass-panel py-2 px-4 rounded-full text-xs font-bold text-emerald-400">
+                            {prop.yield} Annual Yield
+                          </div>
+                          <div className="absolute bottom-6 left-6">
+                            <div className="text-sm text-gray-300 mb-1 flex items-center gap-1"><MapPin size={12} /> {prop.location}</div>
+                            <h3 className="text-2xl font-bold font-premium">{prop.name}</h3>
+                          </div>
+                        </div>
+                        <div className="flex justify-between items-center px-2">
+                          <div className="text-3xl font-bold font-premium">{prop.price}</div>
+                          <div className="text-red-500 flex items-center gap-2 font-bold text-sm tracking-widest uppercase group-hover:gap-4 transition-all">
+                            Inspect Property <ChevronRight size={18} />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "real-estate" && selectedProperty && (
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl mx-auto">
+                  <button onClick={() => setSelectedProperty(null)} className="mb-10 flex items-center gap-2 text-gray-500 hover:text-white group">
+                    <ArrowRight className="rotate-180 group-hover:-translate-x-1 transition-transform" /> Back to Market
+                  </button>
+
+                  <div className="grid grid-cols-12 gap-10 mb-20">
+                    <div className="col-span-12 lg:col-span-7">
+                      <div className="h-[450px] rounded-3xl overflow-hidden mb-8 border border-white/5">
+                        <img src={selectedProperty.image} className="w-full h-full object-cover" />
+                      </div>
+                      <h1 className="text-5xl font-bold mb-4 font-premium tracking-tighter">{selectedProperty.name}</h1>
+                      <p className="text-gray-400 leading-relaxed text-lg mb-10">{selectedProperty.description}</p>
+
+                      <div className="grid grid-cols-2 gap-6">
+                        <div className="p-6 core-card space-y-2">
+                          <div className="text-[10px] uppercase text-gray-500 font-bold tracking-[0.2em]">Target Region</div>
+                          <div className="text-xl font-bold">{selectedProperty.location}</div>
+                        </div>
+                        <div className="p-6 core-card space-y-2">
+                          <div className="text-[10px] uppercase text-gray-500 font-bold tracking-[0.2em]">Asset Standard</div>
+                          <div className="text-xl font-bold text-red-500">ERC-1155 AUR Hybrid</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="col-span-12 lg:col-span-5">
+                      <div className="core-card glass-panel p-8 sticky top-10 border-red-500/20">
+                        <h3 className="text-sm font-bold uppercase tracking-[0.3em] text-gray-400 mb-8 pb-4 border-b border-white/5">Asset Lifecycle</h3>
+
+                        <div className="space-y-8 mb-12">
+                          <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center">
+                              <User className="text-red-500" />
+                            </div>
+                            <div>
+                              <div className="text-[10px] uppercase text-gray-500 font-bold">Landlord / GP</div>
+                              <div className="text-lg font-bold">{selectedProperty.landlord}</div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center">
+                              <Phone className="text-gold" />
+                            </div>
+                            <div>
+                              <div className="text-[10px] uppercase text-gray-500 font-bold">Authorization Line</div>
+                              <div className="text-lg font-bold">{selectedProperty.phone}</div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="p-6 bg-white/5 rounded-2xl mb-10 text-center">
+                          <div className="text-[10px] uppercase text-gray-500 font-bold mb-1 tracking-[0.2em]">Listing Price</div>
+                          <div className="text-5xl font-bold font-premium text-red-500">{selectedProperty.price}</div>
+                        </div>
+
+                        <button
+                          onClick={handleEscrowPay}
+                          disabled={isPayingEscrow}
+                          className="w-full btn-primary py-6 text-lg relative overflow-hidden"
+                        >
+                          {isPayingEscrow ? (
+                            <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 2 }}><RefreshCcw /></motion.div>
+                          ) : paymentSuccess ? (
+                            <Check className="text-green-400" />
+                          ) : (
+                            "Pay to Escrow"
+                          )}
+                        </button>
+                        <p className="mt-4 text-[10px] text-center text-gray-500 uppercase tracking-tighter">Funds are locked in AUR-ESCROW-V1 contract until approval.</p>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {activeTab === "markets" && (
+                <div className="max-w-6xl mx-auto">
+                  <h2 className="text-xs uppercase tracking-[0.4em] text-gray-500 mb-2 font-bold uppercase tracking-[0.2em]">Ecosystem Expansion</h2>
+                  <h1 className="text-5xl font-bold font-premium tracking-tighter italic mb-16">Global Private Markets</h1>
+
+                  <div className="grid grid-cols-3 gap-8">
+                    <MarketTile onClick={() => setSelectedMarket("Commercial REITs")} icon={<Building2 />} title="Commercial REITs" description="Bespoke institutional office and retail portfolios." stats="12 Projects • 8.4% APY" />
+                    <MarketTile onClick={() => setSelectedMarket("Visa Programs")} icon={<Landmark />} title="Visa Programs" description="Portugal, Greece, and Dubai investment compliance." stats="Fully Compliant • +2,400 Users" />
+                    <MarketTile onClick={() => setSelectedMarket("Aureum Debt")} icon={<CreditCard />} title="Aureum Debt" description="Securitized real estate loans and yield engines." stats="Liquidity: €450M" />
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "settings" && (
+                <div className="max-w-2xl mx-auto">
+                  <h2 className="text-4xl font-bold mb-16 font-premium italic text-red-500">System Architecture</h2>
+
+                  <div className="space-y-12">
+                    <section>
+                      <h3 className="text-[10px] font-bold uppercase tracking-[0.3em] text-gray-500 mb-6 border-b border-white/5 pb-2">Network Endpoint</h3>
+                      <div className="flex gap-3">
+                        <input value={rpcServer} onChange={(e) => setRpcServer(e.target.value)} className="input-field font-mono text-sm" />
+                        <button className="btn-outline">Switch</button>
+                      </div>
+                    </section>
+
+                    <section>
+                      <h3 className="text-[10px] font-bold uppercase tracking-[0.3em] text-gray-500 mb-6 border-b border-white/5 pb-2">Security Hub</h3>
+                      <div className="space-y-4">
+                        <div className="p-6 core-card flex justify-between items-center group">
+                          <div>
+                            <div className="font-bold mb-1">Export Private Key</div>
+                            <div className="text-xs text-gray-500">Emergency backup for external signing</div>
+                          </div>
+                          <button onClick={handleExportPK} className="btn-outline py-2 px-6 text-[10px]">Export</button>
+                        </div>
+
+                        <button className="w-full btn-outline py-4 text-xs font-bold tracking-widest transition-all hover:bg-red-600/10 hover:border-red-500/40">Modify Safety Password</button>
+                      </div>
+                    </section>
+                  </div>
+                </div>
+              )}
+            </main>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* OVERLAYS */}
+      <AnimatePresence>
+        {isReceiving && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-6"
+          >
+            <div className="max-w-md w-full core-card p-10 glass-panel border-white/10 text-center">
+              <h3 className="text-2xl font-bold mb-2 font-premium tracking-tighter">Receive Core Assets</h3>
+              <p className="text-gray-500 text-sm mb-10">Scan to initiate a secure transfer to your Aureum vault.</p>
+
+              <div className="bg-white p-6 rounded-3xl inline-block mb-10 shadow-[0_0_50px_rgba(255,255,255,0.1)]">
+                <QRCodeSVG value={walletAddress} size={240} fgColor="#000000" />
+              </div>
+
+              <div className="p-4 bg-white/5 rounded-xl border border-white/5 flex items-center justify-between mb-10">
+                <span className="font-mono text-xs text-gray-400">{walletAddress.substring(0, 8)}...{walletAddress.substring(walletAddress.length - 6)}</span>
+                <button className="text-red-500"><Copy size={16} /></button>
+              </div>
+
+              <button onClick={() => setIsReceiving(false)} className="btn-primary w-full">Done</button>
+            </div>
+          </motion.div>
+        )}
+
+        {isSending && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-6">
+            <div className="max-w-lg w-full core-card p-10 glass-panel border-white/10">
+              <h3 className="text-2xl font-bold mb-2 font-premium tracking-tighter">Dispatch Assets</h3>
+              <p className="text-gray-500 text-sm mb-10">Transfer AUR tokens to another wallet address on the Aureum network.</p>
+
+              <div className="space-y-6 mb-10">
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Recipient Address</label>
+                  <input placeholder="A..." className="input-field font-mono" />
+                  <p className="text-[10px] text-gray-600 mt-1">Enter valid Aureum address starting with 'A'</p>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Amount (AUR)</label>
+                    <input placeholder="0.00" className="input-field" type="number" step="0.01" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Gas Fee (AUR)</label>
+                    <input placeholder="0.001" className="input-field" type="number" step="0.0001" defaultValue="0.001" />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Transaction Note (Optional)</label>
+                  <textarea placeholder="Add a private note for this transaction..." className="input-field resize-none" rows={3}></textarea>
+                </div>
+                <div className="p-4 bg-white/5 rounded-xl border border-white/5">
+                  <div className="flex justify-between text-xs mb-2">
+                    <span className="text-gray-500">Total Amount:</span>
+                    <span className="font-bold">0.00 AUR</span>
+                  </div>
+                  <div className="flex justify-between text-xs mb-2">
+                    <span className="text-gray-500">Network Fee:</span>
+                    <span className="font-bold">0.001 AUR</span>
+                  </div>
+                  <div className="flex justify-between text-sm pt-2 border-t border-white/5">
+                    <span className="text-gray-400 font-bold uppercase tracking-widest text-[10px]">Total Debit:</span>
+                    <span className="font-bold text-red-500">0.001 AUR</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <button onClick={() => setIsSending(false)} className="btn-outline flex-1">Abort</button>
+                <button className="btn-primary flex-1">Confirm Transfer</button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* PASSWORD PROMPT FOR PRIVATE KEY */}
+        {showPasswordPrompt && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-6">
+            <div className="max-w-md w-full core-card p-10 glass-panel border-red-500/20">
+              <div className="flex items-center gap-4 mb-6">
+                <div className="w-12 h-12 rounded-full bg-red-600/10 flex items-center justify-center">
+                  <Shield className="text-red-500" size={24} />
+                </div>
+                <h3 className="text-2xl font-bold font-premium tracking-tighter">Authentication Required</h3>
+              </div>
+              <p className="text-gray-400 text-sm mb-8">Enter your wallet password to view your private key.</p>
+
+              <div className="space-y-6 mb-8">
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Password</label>
+                  <input
+                    type="password"
+                    className="input-field"
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handlePasswordSubmit()}
+                    placeholder="••••••••••••"
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <button onClick={() => { setShowPasswordPrompt(false); setPasswordInput(""); }} className="btn-outline flex-1">Cancel</button>
+                <button onClick={handlePasswordSubmit} className="btn-primary flex-1">Unlock</button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* PRIVATE KEY WARNING */}
+        {showPKWarning && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-6">
+            <div className="max-w-lg w-full core-card p-10 glass-panel border-red-500/20">
+              <div className="flex items-center gap-4 mb-6">
+                <div className="w-14 h-14 rounded-full bg-red-600/20 flex items-center justify-center animate-pulse">
+                  <Shield className="text-red-500" size={28} />
+                </div>
+                <h3 className="text-3xl font-bold font-premium tracking-tighter text-red-500">SECURITY WARNING</h3>
+              </div>
+
+              <div className="p-6 bg-red-500/10 border border-red-500/30 rounded-2xl mb-8">
+                <p className="text-sm leading-relaxed mb-4 font-bold text-red-400">⚠️ NEVER share your private key with anyone!</p>
+                <ul className="text-xs text-gray-400 space-y-2 leading-relaxed">
+                  <li>• Anyone with access to this key can steal ALL your assets</li>
+                  <li>• Aureum support will NEVER ask for your private key</li>
+                  <li>• Do not enter this key on websites or share via email/messages</li>
+                  <li>• Store this in a secure, offline location only</li>
+                </ul>
+              </div>
+
+              {showPK && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
+                  <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest mb-2 block">Your Private Key</label>
+                  <div className="p-4 bg-black/60 border border-red-500/20 rounded-xl font-mono text-[11px] break-all leading-loose text-red-200 select-all">
+                    pk_A_{walletAddress.substring(1)}_9d3e8f7a2b0c1e4f5a6b7c8d9e0f1a2b3c4d5e6f
+                  </div>
+                </motion.div>
+              )}
+
+              <div className="flex gap-4">
+                <button onClick={() => { setShowPKWarning(false); setShowPK(false); }} className="btn-outline flex-1">Close & Hide</button>
+                <button onClick={() => setShowPK(!showPK)} className="btn-primary flex-1">
+                  {showPK ? "Hide Key" : "Reveal Key"}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+        {/* FULL TRANSACTION HISTORY */}
+        {showAllTransactions && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-3xl flex items-center justify-center p-6">
+            <div className="max-w-4xl w-full core-card p-10 glass-panel border-white/10 flex flex-col max-h-[90vh]">
+              <div className="flex justify-between items-center mb-10">
+                <h3 className="text-3xl font-bold font-premium tracking-tighter italic">Ledger Explorer</h3>
+                <button onClick={() => setShowAllTransactions(false)} className="btn-outline px-6 py-2">Close Explorer</button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto space-y-4 pr-4 custom-scrollbar">
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((_, i) => (
+                  <TransactionRow
+                    key={i}
+                    type={i % 3 === 0 ? "received" : i % 3 === 1 ? "sent" : "property"}
+                    from={i % 3 === 0 ? "A9x2...n3m1" : undefined}
+                    to={i % 3 === 1 ? "Ab4z...k9v2" : undefined}
+                    property={i % 3 === 2 ? "Aureum Luxury Villa" : undefined}
+                    amount={i % 3 === 0 ? "+450.00 AUR" : i % 3 === 1 ? "-120.00 AUR" : "-750,000.00 EUR"}
+                    date={`${i + 1} day${i === 0 ? "" : "s"} ago`}
+                    status="confirmed"
+                  />
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* MARKET DETAIL */}
+        {selectedMarket && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-6">
+            <div className="max-w-2xl w-full core-card p-12 glass-panel border-red-500/20">
+              <div className="flex items-center gap-6 mb-10">
+                <div className="w-20 h-20 rounded-3xl bg-red-600/10 flex items-center justify-center text-red-500">
+                  {selectedMarket === "Commercial REITs" ? <Building2 size={40} /> : selectedMarket === "Visa Programs" ? <Landmark size={40} /> : <CreditCard size={40} />}
+                </div>
+                <div>
+                  <h2 className="text-4xl font-bold font-premium tracking-tighter">{selectedMarket}</h2>
+                  <p className="text-gray-500 font-medium">Bespoke Institutional Investment Vehicle</p>
+                </div>
+              </div>
+
+              <div className="space-y-8 mb-12">
+                <div className="p-6 bg-white/5 rounded-2xl border border-white/5 leading-relaxed">
+                  <h4 className="text-[10px] uppercase text-gray-500 font-bold mb-3 tracking-widest">Executive Summary</h4>
+                  <p className="text-gray-300">Accessing private {selectedMarket.toLowerCase()} allows high-net-worth individuals to participate in securitized real estate debt and equity markets. This compliant instrument is natively tokenized on the Aureum Mainnet.</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="p-6 core-card space-y-2">
+                    <div className="text-[10px] uppercase text-gray-500 font-bold">Minimum Entry</div>
+                    <div className="text-2xl font-bold">100,000 AUR</div>
+                  </div>
+                  <div className="p-6 core-card space-y-2">
+                    <div className="text-[10px] uppercase text-gray-500 font-bold">Target Yield</div>
+                    <div className="text-2xl font-bold text-emerald-500">8.4% - 12%</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <button onClick={() => setSelectedMarket(null)} className="btn-outline flex-1">Back to Ecosystem</button>
+                <button className="btn-primary flex-1">Initiate Investment</button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function SidebarItem({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-5 p-4 rounded-2xl transition-all duration-300 ${active
+        ? "bg-red-600/10 text-red-500 shadow-[inset_0_0_30px_rgba(232,65,66,0.05)] border border-red-500/10"
+        : "text-gray-500 hover:text-white hover:bg-white/5"
+        }`}
+    >
+      {icon}
+      <span className="text-xs font-bold tracking-[0.2em] uppercase">{label}</span>
+      {active && <motion.div layoutId="nav-ind" className="ml-auto w-1 h-1 rounded-full bg-red-500 shadow-[0_0_10px_#E84142]" />}
+    </button>
+  );
+}
+
+function AssetRow({ symbol, name, balance, value }: { symbol: string, name: string, balance: string, value: string }) {
+  return (
+    <div className="core-card p-8 flex justify-between items-center group cursor-pointer">
+      <div className="flex items-center gap-6">
+        <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center font-bold text-red-500 text-xl group-hover:bg-red-600 group-hover:text-white transition-all">
+          {symbol[0]}
+        </div>
+        <div>
+          <div className="text-2xl font-bold font-premium tracking-tight">{symbol}</div>
+          <div className="text-[10px] text-gray-500 uppercase tracking-[0.3em] font-bold">{name}</div>
+        </div>
+      </div>
+      <div className="text-right">
+        <div className="text-3xl font-bold font-premium">{balance}</div>
+        <div className="text-sm text-gray-500 font-medium">{value}</div>
+      </div>
+    </div>
+  );
+}
+
+function MarketTile({ icon, title, description, stats, onClick }: { icon: React.ReactNode, title: string, description: string, stats: string, onClick?: () => void }) {
+  return (
+    <div onClick={onClick} className="core-card p-8 group hover:bg-white/5 transition-all cursor-pointer hover:border-red-500/20">
+      <div className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center mb-6 text-red-500 group-hover:scale-110 transition-transform">
+        {icon}
+      </div>
+      <h3 className="text-xl font-bold mb-3 font-premium">{title}</h3>
+      <p className="text-sm text-gray-500 leading-relaxed mb-6">{description}</p>
+      <div className="pt-6 border-t border-white/5 flex justify-between items-center text-[10px] font-bold text-red-500 uppercase tracking-widest">
+        <span>{stats}</span>
+        <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform" />
+      </div>
+    </div>
+  );
+}
+
+function TransactionRow({ type, from, to, property, amount, date, status }: {
+  type: "sent" | "received" | "property",
+  from?: string,
+  to?: string,
+  property?: string,
+  amount: string,
+  date: string,
+  status: "confirmed" | "pending" | "escrow"
+}) {
+  const getIcon = () => {
+    if (type === "received") return <Send size={20} className="rotate-180 text-emerald-500" />;
+    if (type === "sent") return <Send size={20} className="text-red-500" />;
+    return <Home size={20} className="text-blue-500" />;
+  };
+
+  const getLabel = () => {
+    if (type === "received") return `From ${from}`;
+    if (type === "sent") return `To ${to}`;
+    return property;
+  };
+
+  const getStatusColor = () => {
+    if (status === "confirmed") return "text-emerald-500 bg-emerald-500/10 border-emerald-500/20";
+    if (status === "pending") return "text-yellow-500 bg-yellow-500/10 border-yellow-500/20";
+    return "text-blue-500 bg-blue-500/10 border-blue-500/20";
+  };
+
+  return (
+    <div className="core-card p-6 flex items-center justify-between group hover:border-white/10 transition-all">
+      <div className="flex items-center gap-4">
+        <div className="w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center">
+          {getIcon()}
+        </div>
+        <div>
+          <div className="text-sm font-bold text-white mb-1">{getLabel()}</div>
+          <div className="text-xs text-gray-500 font-medium">{date}</div>
+        </div>
+      </div>
+      <div className="text-right flex items-center gap-4">
+        <div>
+          <div className={`text-lg font-bold font-premium ${amount.startsWith('+') ? 'text-emerald-500' : 'text-gray-300'}`}>{amount}</div>
+          <div className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-md border ${getStatusColor()}`}>
+            {status}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
