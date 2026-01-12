@@ -94,14 +94,20 @@ impl ConsensusEngine {
         false
     }
 
-    pub fn next_step(&mut self, storage: &crate::storage::ChainStorage) {
+    pub fn next_step(&mut self, storage: &crate::storage::ChainStorage, block: Option<&crate::core::Block>) {
         match self.step {
             BftStep::Propose => self.step = BftStep::Prevote,
             BftStep::Prevote => self.step = BftStep::Precommit,
             BftStep::Precommit => self.step = BftStep::Commit,
             BftStep::Commit => {
-                // Finalized! Distribute rewards and handle potential slashes
-                self.distribute_rewards(storage);
+                // Finalized! Process economics
+                if let Some(b) = block {
+                    let total_fees: u64 = b.transactions.iter().map(|tx| tx.fee).sum();
+                    self.process_block_economics(storage, total_fees);
+                } else {
+                    self.distribute_rewards(storage, 0);
+                }
+                
                 self.check_downtime_slashing(storage);
 
                 self.height += 1;
@@ -114,21 +120,38 @@ impl ConsensusEngine {
         }
     }
 
-    fn distribute_rewards(&mut self, storage: &crate::storage::ChainStorage) {
-        let reward_per_block = 100; // 100 AUR reward divided among active validators
+    fn process_block_economics(&mut self, storage: &crate::storage::ChainStorage, total_fees: u64) {
+        let burn_amount = total_fees / 2;
+        let validator_reward = total_fees - burn_amount;
+
+        // Update Global State: Burn total supply
+        let mut state = storage.get_chain_state().unwrap_or(crate::core::ChainState { total_supply: 21_000_000_000, burned_fees: 0 });
+        state.total_supply -= burn_amount;
+        state.burned_fees += burn_amount;
+        storage.save_chain_state(&state);
+
+        info!("Institutional Burn: {} AUR permanently removed. Total Burned: {} AUR", burn_amount, state.burned_fees);
+        
+        self.distribute_rewards(storage, validator_reward);
+    }
+
+    fn distribute_rewards(&mut self, storage: &crate::storage::ChainStorage, additional_fees: u64) {
+        let base_reward = 100; // Fixed AUR emission
+        let total_pool = base_reward + additional_fees;
+        
         let active_validators_count = self.validator_set.validators.len();
         if active_validators_count == 0 { return; }
 
-        let share = reward_per_block / active_validators_count as u64;
+        let share = total_pool / active_validators_count as u64;
         
         for validator in &mut self.validator_set.validators {
             validator.stake += share;
             storage.update_balance(&validator.address, storage.get_balance(&validator.address) + share);
         }
         
-        self.validator_set.total_stake += reward_per_block;
+        self.validator_set.total_stake += total_pool;
         storage.save_validator_set(&self.validator_set);
-        info!("Distributed block rewards: {} AUR per validator", share);
+        info!("Distributed block rewards & fee shares: {} AUR per validator", share);
     }
 
     fn check_downtime_slashing(&mut self, storage: &crate::storage::ChainStorage) {

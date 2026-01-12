@@ -53,4 +53,13 @@ impl ChainStorage {
     pub fn get_validator_set(&self) -> Option<crate::core::ValidatorSet> {
         self.db.get(b"validators:current").ok()?.and_then(|data| crate::core::ValidatorSet::decode(&mut &data[..]).ok())
     }
+
+    pub fn save_chain_state(&self, state: &crate::core::ChainState) {
+        let encoded = state.encode();
+        self.db.insert(b"state:global", encoded).expect("Failed to save chain state");
+    }
+
+    pub fn get_chain_state(&self) -> Option<crate::core::ChainState> {
+        self.db.get(b"state:global").ok()?.and_then(|data| crate::core::ChainState::decode(&mut &data[..]).ok())
+    }
 }

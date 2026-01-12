@@ -8,6 +8,7 @@ pub struct Transaction {
     pub receiver: String, // Format: aur1...
     pub amount: u64,
     pub nonce: u64,
+    pub fee: u64,         // Institutional network fee
     pub signature: Vec<u8>,
     pub tx_type: TransactionType,
 }
@@ -18,8 +19,16 @@ pub enum TransactionType {
     Stake { amount: u64 },
     Unstake { amount: u64 },
     Delegate { validator: String, amount: u64 },
+    Mint { amount: u64 }, // Institutional minting
+    Burn { amount: u64 }, // Intentional burning
     TokenizeProperty { address: String, metadata: String },
     IdentityUpdate { did: String },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
+pub struct ChainState {
+    pub total_supply: u64,
+    pub burned_fees: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode, PartialEq)]

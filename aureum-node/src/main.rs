@@ -93,6 +93,13 @@ async fn main() {
         };
         storage.save_validator_set(&set);
         storage.update_balance("aur1initial_validator_address", 1_000_000);
+
+        // Initialize Global State
+        let initial_state = crate::core::ChainState {
+            total_supply: 21_000_000_000, // 21B AUR Max Supply
+            burned_fees: 0,
+        };
+        storage.save_chain_state(&initial_state);
     }
 
     let val_set = storage.get_validator_set().expect("Fatal: No validator set found");
@@ -104,6 +111,16 @@ async fn main() {
     let oracle = Arc::new(Mutex::new(AureumOracle::new(vec!["aur1initial_validator_address".to_string()])));
 
     let mut io = IoHandler::default();
+
+    // RPC: aureum_getChainState
+    let storage_rpc = storage.clone();
+    io.add_method("aureum_getChainState", move |_| {
+        let storage = storage_rpc.clone();
+        async move {
+            let state = storage.get_chain_state().unwrap();
+            Ok(serde_json::to_value(state).unwrap())
+        }
+    });
 
     // RPC: aureum_registerComplianceProfile (Priority 4)
     let comp_clone = compliance_engine.clone();
