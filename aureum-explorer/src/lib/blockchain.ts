@@ -1,0 +1,112 @@
+/**
+ * Aureum Blockchain RPC Client for Explorer
+ * 
+ * Provides methods to fetch and display live blockchain data
+ */
+
+const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "http://localhost:8545";
+
+interface RPCRequest {
+    jsonrpc: "2.0";
+    method: string;
+    params: any[];
+    id: number;
+}
+
+interface RPCResponse {
+    jsonrpc: "2.0";
+    result?: any;
+    error?: {
+        code: number;
+        message: string;
+    };
+    id: number;
+}
+
+async function rpcCall(method: string, params: any[] = []): Promise<any> {
+    const request: RPCRequest = {
+        jsonrpc: "2.0",
+        method,
+        params,
+        id: Date.now(),
+    };
+
+    try {
+        const response = await fetch(RPC_URL, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(request),
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status ${response.status}`);
+        }
+
+        const data: RPCResponse = await response.json();
+
+        if (data.error) {
+            throw new Error(`RPC Error: ${data.error.message}`);
+        }
+
+        return data.result;
+    } catch (error) {
+        console.error(`RPC call failed for ${method}:`, error);
+        return null; // Return null for explorer to use mock data
+    }
+}
+
+/**
+ * Get the latest block from the blockchain
+ */
+export async function getLatestBlock(): Promise<any> {
+    return await rpcCall("aureum_getLatestBlock", []);
+}
+
+/**
+ * Get block by number/height
+ */
+export async function getBlockByNumber(height: number): Promise<any> {
+    return await rpcCall("aureum_getBlockByNumber", [height]);
+}
+
+/**
+ * Get multiple recent blocks
+ */
+export async function getRecentBlocks(count: number = 10): Promise<any[]> {
+    try {
+        const latest = await getLatestBlock();
+        if (!latest) return [];
+
+        const blocks = [];
+        const startHeight = Math.max(0, latest.header.height - count + 1);
+
+        for (let i = latest.header.height; i >= startHeight; i--) {
+            const block = await getBlockByNumber(i);
+            if (block) blocks.push(block);
+        }
+
+        return blocks;
+    } catch (error) {
+        console.error("Failed to fetch recent blocks:", error);
+        return [];
+    }
+}
+
+/**
+ * Get property information
+ */
+export async function getProperty(propertyId: string): Promise<any> {
+    return await rpcCall("aureum_getProperty", [propertyId]);
+}
+
+/**
+ * Check node health
+ */
+export async function isNodeOnline(): Promise<boolean> {
+    const result = await getLatestBlock();
+    return result !== null;
+}
+
+export { RPC_URL };
