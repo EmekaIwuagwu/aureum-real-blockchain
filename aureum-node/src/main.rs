@@ -9,6 +9,11 @@ use aureum_node::network::{P2PNetwork, TOPIC_TRANSACTIONS, TOPIC_BLOCKS};
 use futures::StreamExt;
 use libp2p::swarm::SwarmEvent;
 use parity_scale_codec::Decode;
+use log::{info, warn, error};
+use jsonrpc_http_server::jsonrpc_core::{IoHandler, Value, Params};
+use jsonrpc_http_server::ServerBuilder;
+use std::sync::Arc;
+use tokio::sync::{Mutex, mpsc};
 
 #[tokio::main]
 async fn main() {
@@ -131,6 +136,9 @@ async fn main() {
                     let mut txs_lock = mempool_loop.lock().await;
                     let current_txs = txs_lock.drain(..).collect::<Vec<_>>();
                     
+                    // Get current timestamp for all operations
+                    let current_timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                    
                     // 2. Execute Transactions in AVM
                     for tx in &current_txs {
                         // Anti-Replay Protection (Section 1.2.C)
@@ -160,7 +168,7 @@ async fn main() {
                                     legal_description: address.clone(),
                                     coordinates: (0.0, 0.0),
                                     valuation_eur: tx.amount,
-                                    valuation_timestamp: block.header.timestamp,
+                                    valuation_timestamp: current_timestamp,
                                     valuation_oracle: "system".to_string(),
                                     title_deed_hash: metadata.clone(),
                                     survey_hash: "".to_string(),
@@ -185,7 +193,7 @@ async fn main() {
                                             investment_amount: prop.valuation_eur,
                                             program: program.clone(),
                                             status: aureum_node::core::ApplicationStatus::Pending,
-                                            timestamp: block.header.timestamp,
+                                            timestamp: current_timestamp,
                                         };
                                         storage_loop.save_visa_application(&app);
                                         storage_loop.increment_nonce(&tx.sender);
