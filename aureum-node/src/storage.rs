@@ -62,4 +62,34 @@ impl ChainStorage {
     pub fn get_chain_state(&self) -> Option<crate::core::ChainState> {
         self.db.get(b"state:global").ok()?.and_then(|data| crate::core::ChainState::decode(&mut &data[..]).ok())
     }
+
+    // --- EVM State Persistence ---
+
+    pub fn get_account_code(&self, address: &[u8; 20]) -> Vec<u8> {
+        self.db.get(format!("code:{:x?}", address).as_bytes())
+            .ok().flatten()
+            .map(|v| v.to_vec())
+            .unwrap_or_default()
+    }
+
+    pub fn save_account_code(&self, address: &[u8; 20], code: Vec<u8>) {
+        self.db.insert(format!("code:{:x?}", address).as_bytes(), code).expect("Sled error");
+    }
+
+    pub fn get_storage_slot(&self, address: &[u8; 20], slot: &[u8; 32]) -> [u8; 32] {
+        let key = format!("storage:{:x?}:{:x?}", address, slot);
+        match self.db.get(key.as_bytes()).ok().flatten() {
+            Some(data) => {
+                let mut res = [0u8; 32];
+                res.copy_from_slice(&data);
+                res
+            },
+            None => [0u8; 32],
+        }
+    }
+
+    pub fn save_storage_slot(&self, address: &[u8; 20], slot: &[u8; 32], value: [u8; 32]) {
+        let key = format!("storage:{:x?}:{:x?}", address, slot);
+        self.db.insert(key.as_bytes(), &value[..]).expect("Sled error");
+    }
 }
