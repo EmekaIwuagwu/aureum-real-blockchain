@@ -23,6 +23,8 @@ interface RPCResponse {
     id: number;
 }
 
+import nacl from "tweetnacl";
+
 /**
  * Make a JSON-RPC call to the Aureum node
  */
@@ -61,6 +63,70 @@ async function rpcCall(method: string, params: any[] = []): Promise<any> {
 }
 
 /**
+ * Helper to convert number to 8-byte BigEndian array
+ */
+function u64toBeBytes(n: number): Uint8Array {
+    const buf = new ArrayBuffer(8);
+    const view = new DataView(buf);
+    view.setBigUint64(0, BigInt(n), false); // false = BigEndian
+    return new Uint8Array(buf);
+}
+
+/**
+ * Sign and send a transaction
+ */
+export async function signAndSendTransaction(
+    sender: string,
+    receiver: string,
+    amount: number,
+    nonce: number,
+    fee: number,
+    privateKeyHex: string
+): Promise<string> {
+    const encoder = new TextEncoder();
+
+    // Parse private key from hex string
+    const pkBytes = new Uint8Array(privateKeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const keyPair = nacl.sign.keyPair.fromSeed(pkBytes);
+    const pubKey = keyPair.publicKey;
+
+    // Construct message to sign (must match core.rs)
+    const senderBytes = encoder.encode(sender);
+    const receiverBytes = encoder.encode(receiver);
+    const amountBytes = u64toBeBytes(amount);
+    const nonceBytes = u64toBeBytes(nonce);
+    const feeBytes = u64toBeBytes(fee);
+    const typeBytes = new Uint8Array([0]); // Transfer
+
+    const totalLen = senderBytes.length + receiverBytes.length + amountBytes.length + nonceBytes.length + feeBytes.length + pubKey.length + typeBytes.length;
+    const message = new Uint8Array(totalLen);
+
+    let offset = 0;
+    message.set(senderBytes, offset); offset += senderBytes.length;
+    message.set(receiverBytes, offset); offset += receiverBytes.length;
+    message.set(amountBytes, offset); offset += amountBytes.length;
+    message.set(nonceBytes, offset); offset += nonceBytes.length;
+    message.set(feeBytes, offset); offset += feeBytes.length;
+    message.set(pubKey, offset); offset += pubKey.length;
+    message.set(typeBytes, offset);
+
+    const signature = nacl.sign.detached(message, keyPair.secretKey);
+
+    const tx = {
+        sender,
+        receiver,
+        amount,
+        nonce,
+        fee,
+        signature: Array.from(signature),
+        pub_key: Array.from(pubKey),
+        tx_type: "Transfer"
+    };
+
+    return await rpcCall("aureum_submitTransaction", [tx]);
+}
+
+/**
  * Get account balance in AUR
  */
 export async function getBalance(address: string): Promise<number> {
@@ -74,21 +140,6 @@ export async function getBalance(address: string): Promise<number> {
 export async function getNonce(address: string): Promise<number> {
     const nonce = await rpcCall("aureum_getNonce", [address]);
     return typeof nonce === "number" ? nonce : parseInt(nonce || "0");
-}
-
-/**
- * Send a signed transaction to the network
- */
-export async function sendTransaction(tx: {
-    sender: string;
-    receiver: string;
-    amount: number;
-    nonce: number;
-    fee: number;
-    signature: string;
-    tx_type: any;
-}): Promise<string> {
-    return await rpcCall("aureum_sendTransaction", [tx]);
 }
 
 /**

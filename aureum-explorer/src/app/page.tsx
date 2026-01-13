@@ -11,6 +11,8 @@ import {
   FileText, TrendingUp, Layers, Wallet
 } from "lucide-react";
 
+import { getLatestBlock, getRecentBlocks, isNodeOnline, RPC_URL } from "../lib/blockchain";
+
 type ViewType = "home" | "blocks" | "transactions" | "markets" | "assets" | "block_detail" | "tx_detail";
 
 export default function AureumExplorer() {
@@ -18,19 +20,67 @@ export default function AureumExplorer() {
   const [view, setView] = useState<ViewType>("home");
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isTxModalOpen, setIsTxModalOpen] = useState(false);
+
+  const [latestBlock, setLatestBlock] = useState<any>(null);
+  const [blocks, setBlocks] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [isOnline, setIsOnline] = useState(false);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
     window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
+
+    // Initial fetch
+    fetchData();
+
+    // Polling
+    const interval = setInterval(fetchData, 3000);
+
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      clearInterval(interval);
+    };
   }, []);
+
+  const fetchData = async () => {
+    const online = await isNodeOnline();
+    setIsOnline(online);
+    if (!online) return;
+
+    const lb = await getLatestBlock();
+    setLatestBlock(lb);
+
+    const recentBlocks = await getRecentBlocks(10);
+    setBlocks(recentBlocks);
+
+    // Extract transactions from blocks
+    const txs: any[] = [];
+    if (recentBlocks) {
+      recentBlocks.forEach(b => {
+        if (b && b.transactions) {
+          b.transactions.forEach((tx: any) => {
+            txs.push({ ...tx, blockHeight: b.header.height, timestamp: b.header.timestamp });
+          });
+        }
+      });
+    }
+    setTransactions(txs.slice(0, 10));
+  };
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery) return;
 
-    if (searchQuery.startsWith("0x")) {
-      openTx(searchQuery);
+    if (searchQuery.startsWith("0x") || searchQuery.startsWith("A")) {
+      // Search for transaction by hash
+      const foundTx = transactions.find(tx => tx.hash === searchQuery);
+      if (foundTx) {
+        openTx(foundTx);
+      } else {
+        // If not found in current list, create a minimal object with the hash
+        openTx({ hash: searchQuery, amount: 0, sender: "Unknown", receiver: "Unknown", fee: 0, nonce: 0 });
+      }
     } else if (!isNaN(Number(searchQuery))) {
       openBlock(Number(searchQuery));
     } else {
@@ -44,10 +94,9 @@ export default function AureumExplorer() {
     window.scrollTo(0, 0);
   };
 
-  const openTx = (hash: string) => {
-    setSelectedItem({ hash });
-    setView("tx_detail");
-    window.scrollTo(0, 0);
+  const openTx = (tx: any) => {
+    setSelectedItem(tx);
+    setIsTxModalOpen(true);
   };
 
   const navigateTo = (newView: ViewType) => {
@@ -127,9 +176,9 @@ export default function AureumExplorer() {
               {/* Real-time Network Matrix */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <MetricCard label="AUR Evaluation" value="€2.45" trend="+4.2%" icon={<Activity className="text-emerald-500" />} />
-                <MetricCard label="Network Throughput" value="12.4k TPS" trend="Peak" icon={<Zap className="text-red-500" />} />
+                <MetricCard label="Network Status" value={isOnline ? "OPERATIONAL" : "OFFLINE"} trend={isOnline ? "Live" : "Down"} icon={<Zap className={isOnline ? "text-emerald-500" : "text-red-500"} />} />
                 <MetricCard label="Asset Liquidity" value="€2.45B" trend="Stable" icon={<Landmark className="text-gray-400" />} />
-                <MetricCard label="Current Block" value="#12,405,821" trend="Synced" icon={<Box className="text-gray-400" />} />
+                <MetricCard label="Current Block" value={latestBlock ? `#${latestBlock.header.height}` : "SYNCING..."} trend="Synced" icon={<Box className="text-gray-400" />} />
               </div>
 
               <div className="grid grid-cols-12 gap-10">
@@ -143,9 +192,12 @@ export default function AureumExplorer() {
                     <button onClick={() => navigateTo("blocks")} className="text-xs font-bold text-red-500 border-b border-red-500/20 pb-1">View All</button>
                   </div>
                   <div className="space-y-4">
-                    {[12405821, 12405820, 12405819, 12405818, 12405817].map((block, i) => (
-                      <BlockRow key={block} number={block} i={i} onClick={() => openBlock(block)} />
+                    {blocks.map((block, i) => (
+                      <BlockRow key={block.header.height || i} number={block.header.height} timestamp={block.header.timestamp} txCount={block.transactions.length} i={i} onClick={() => openBlock(block.header.height)} />
                     ))}
+                    {blocks.length === 0 && (
+                      <div className="text-center py-10 text-gray-600 font-bold uppercase italic tracking-widest bg-white/5 rounded-2xl">Genesis Awaiting Blocks</div>
+                    )}
                   </div>
                 </div>
 
@@ -159,9 +211,12 @@ export default function AureumExplorer() {
                     <button onClick={() => navigateTo("transactions")} className="text-xs font-bold text-red-500 border-b border-red-500/20 pb-1">View All</button>
                   </div>
                   <div className="space-y-4">
-                    {[1, 2, 3, 4, 5].map((i) => (
-                      <TxRow key={i} i={i} onClick={() => openTx(`aur_tx_8d24b6e${i}...0f2a`)} />
+                    {transactions.map((tx, i) => (
+                      <TxRow key={i} tx={tx} onClick={() => openTx(tx)} />
                     ))}
+                    {transactions.length === 0 && (
+                      <div className="text-center py-10 text-gray-600 font-bold uppercase italic tracking-widest bg-white/5 rounded-2xl">No Recent Transactions</div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -174,8 +229,8 @@ export default function AureumExplorer() {
             <h2 className="text-xs font-bold uppercase tracking-[0.6em] text-red-500 mb-2">Immutable History</h2>
             <h1 className="text-6xl font-premium font-bold italic mb-12">Universal Block Pulse</h1>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {Array.from({ length: 12 }).map((_, i) => (
-                <BlockRow key={i} number={12405821 - i} i={i} onClick={() => openBlock(12405821 - i)} />
+              {blocks.map((block, i) => (
+                <BlockRow key={i} number={block.header.height} timestamp={block.header.timestamp} txCount={block.transactions.length} i={i} onClick={() => openBlock(block.header.height)} />
               ))}
             </div>
           </motion.div>
@@ -186,8 +241,8 @@ export default function AureumExplorer() {
             <h2 className="text-xs font-bold uppercase tracking-[0.6em] text-red-500 mb-2">Institutional Ledger</h2>
             <h1 className="text-6xl font-premium font-bold italic mb-12">Transaction History</h1>
             <div className="space-y-4">
-              {Array.from({ length: 10 }).map((_, i) => (
-                <TxRow key={i} i={i} onClick={() => openTx(`aur_tx_extended_${i}...8a2b`)} />
+              {transactions.map((tx, i) => (
+                <TxRow key={i} tx={tx} onClick={() => openTx(tx)} />
               ))}
             </div>
           </motion.div>
@@ -242,74 +297,154 @@ export default function AureumExplorer() {
           </motion.div>
         )}
 
-        {view === "tx_detail" && (
-          <motion.div key="tx_detail" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="pt-32 pb-40 px-8 max-w-5xl mx-auto">
-            <button onClick={() => navigateTo("transactions")} className="mb-10 flex items-center gap-2 text-gray-500 hover:text-white group">
-              <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" /> Back to Ledger
-            </button>
-            <div className="flex justify-between items-end mb-12">
-              <div>
-                <h3 className="text-xs font-bold uppercase tracking-[0.4em] text-red-500 mb-2">Transaction Details</h3>
-                <h1 className="text-4xl font-premium font-bold italic tracking-tighter truncate max-w-xl">{selectedItem.hash}</h1>
-              </div>
-              <div className="status-badge bg-red-600 text-white px-4 py-2 flex items-center gap-2">Institutional Transaction</div>
-            </div>
-
-            <div className="grid grid-cols-12 gap-8">
-              <div className="col-span-12 lg:col-span-8 space-y-6">
-                <div className="explorer-card p-10 space-y-10">
-                  <div className="flex justify-between items-center border-b border-white/5 pb-8">
-                    <div className="space-y-1">
-                      <div className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Transaction Status</div>
-                      <div className="flex items-center gap-2 text-emerald-500 font-bold text-lg"><CheckCircle2 size={20} /> Successful Execution</div>
-                    </div>
-                    <div className="text-right space-y-1">
-                      <div className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Network Timestamp</div>
-                      <div className="font-bold text-gray-300">12s ago</div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-12 py-10">
-                    <AssetAddress label="Original Dispatcher" address="aur1k5p...9m4d" title="Luxury Real Estate GP" />
-                    <div className="w-16 h-16 rounded-full border border-white/5 bg-white/5 flex items-center justify-center text-red-500 shadow-xl"><ArrowRightLeft size={28} /></div>
-                    <AssetAddress label="Final Recipient" address="aur1p9j...x2r1" title="Institutional Fund A" />
-                  </div>
-
-                  <div className="pt-10 border-t border-white/5 grid grid-cols-2 gap-10 text-center">
-                    <div>
-                      <div className="text-[10px] uppercase text-gray-500 font-bold mb-3 tracking-widest">Total AUR Transferred</div>
-                      <div className="text-5xl font-premium font-bold italic text-white">45,000 AUR</div>
-                      <div className="text-[10px] text-gray-600 mt-2 font-bold uppercase tracking-widest">Evaluated at €500k</div>
-                    </div>
-                    <div className="border-l border-white/5">
-                      <div className="text-[10px] uppercase text-gray-500 font-bold mb-3 tracking-widest">Inscribed Record</div>
-                      <div className="text-2xl font-premium font-bold italic text-red-500">Golden Palace Lisbon</div>
-                      <div className="text-[10px] text-gray-600 mt-2 font-bold uppercase tracking-widest">Institutional Yield Asset</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="col-span-12 lg:col-span-4 space-y-6">
-                <div className="explorer-card p-8">
-                  <div className="text-[10px] uppercase text-gray-500 font-bold mb-8 tracking-widest">Compliance Engine</div>
-                  <div className="space-y-8">
-                    <ComplianceStep label="Identity Verified (KYC/AML)" done />
-                    <ComplianceStep label="Escrow Smart Lock" done />
-                    <ComplianceStep label="Legal Title Dispatch" done />
-                    <ComplianceStep label="Liquidity Settlement" done />
-                  </div>
-                </div>
-                <div className="explorer-card p-8 bg-red-600/5 border-red-500/10">
-                  <div className="text-[10px] uppercase text-red-500 font-bold mb-1 tracking-widest">Network Fee</div>
-                  <div className="text-3xl font-premium font-bold italic">12.45 AUR</div>
-                  <div className="text-[8px] text-gray-600 font-bold uppercase tracking-widest mt-1">Priority Validation</div>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
       </AnimatePresence>
+
+      {isTxModalOpen && selectedItem && (
+        <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+          className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-3xl flex items-center justify-center p-6 h-screen overflow-hidden"
+        >
+          <div className="max-w-6xl w-full h-[90vh] core-card p-10 glass-panel border-white/10 flex flex-col relative overflow-y-auto custom-scrollbar">
+            <button
+              onClick={() => setIsTxModalOpen(false)}
+              className="fixed top-10 right-10 btn-outline px-6 py-2 z-50 bg-black/50 backdrop-blur-md border-red-500/50 text-red-500 hover:bg-red-500 hover:text-white transition-all shadow-xl"
+            >
+              Close View
+            </button>
+
+            <div className="flex flex-col lg:flex-row justify-between items-start gap-8 mb-16 pt-12">
+              <div className="w-full">
+                <div className="flex items-center gap-4 mb-2">
+                  <h3 className="text-xs font-bold uppercase tracking-[0.4em] text-red-500">Transaction Details</h3>
+                  <div className="h-px flex-1 bg-red-500/20 w-24"></div>
+                </div>
+                {/* PADDING ADDED HERE */}
+                <div className="pt-8 pb-4">
+                  <h1 className="text-3xl lg:text-4xl font-premium font-bold italic tracking-tighter break-all">{selectedItem.hash || "N/A"}</h1>
+                  <a href="#" className="text-[10px] text-red-500 hover:text-white uppercase font-bold tracking-widest mt-2 inline-flex items-center gap-1 transition-colors">
+                    <ExternalLink size={10} /> View on Stablecoin Registry
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-10">
+              {/* Main Transaction Card */}
+              <div className="lg:col-span-2 space-y-6">
+                <div className="explorer-card p-0 overflow-hidden">
+                  <div className="p-8 border-b border-white/5 bg-white/[0.02]">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <div className="text-[10px] uppercase text-gray-500 font-bold tracking-widest mb-1">Total Value</div>
+                        <div className="text-4xl font-premium font-bold italic text-white">{(selectedItem.amount || 0).toLocaleString()} <span className="text-red-500">AUR</span></div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[10px] uppercase text-gray-500 font-bold tracking-widest mb-1">Fee</div>
+                        <div className="text-xl font-bold font-mono text-gray-300">{selectedItem.fee || 0} AUR</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-8 space-y-12">
+                    <div className="flex flex-col md:flex-row items-center justify-between gap-8 relative">
+                      {/* Connector Line */}
+                      <div className="absolute left-1/2 top-8 bottom-8 w-px bg-gradient-to-b from-transparent via-red-500/20 to-transparent hidden md:block -ml-px"></div>
+
+                      <div className="flex-1 w-full relative z-10">
+                        <div className="flex-1">
+                          <div className="text-[10px] uppercase text-gray-500 font-bold mb-3 tracking-widest">From Sender</div>
+                          <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center border border-white/5"><User size={22} className="text-gray-400" /></div>
+                            <div><div className="text-sm font-bold text-gray-200">Origin Wallet</div><div className="text-[10px] text-gray-500 font-mono italic">{selectedItem.sender}</div></div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="relative z-10">
+                        <div className="w-12 h-12 rounded-full bg-[#0A0A0A] border border-white/10 flex items-center justify-center text-red-500 shadow-xl shadow-red-900/10">
+                          <ArrowRightLeft size={20} />
+                        </div>
+                      </div>
+
+                      <div className="flex-1 w-full text-right relative z-10">
+                        <div className="flex flex-col items-end">
+                          <div className="flex-1">
+                            <div className="text-[10px] uppercase text-gray-500 font-bold mb-3 tracking-widest">To Receiver</div>
+                            <div className="flex items-center gap-4">
+                              <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center border border-white/5"><User size={22} className="text-gray-400" /></div>
+                              <div><div className="text-sm font-bold text-gray-200">Target Wallet</div><div className="text-[10px] text-gray-500 font-mono italic">{selectedItem.receiver}</div></div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 pt-8 border-t border-white/5">
+                      <div>
+                        <div className="text-[10px] uppercase text-gray-500 font-bold tracking-widest mb-2">Block Height</div>
+                        <div className="flex items-center gap-2">
+                          <Layers size={14} className="text-gray-600" />
+                          <span className="font-mono text-sm text-gray-300">#{selectedItem.blockHeight || "Pending"}</span>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] uppercase text-gray-500 font-bold tracking-widest mb-2">Timestamp</div>
+                        <div className="flex items-center gap-2">
+                          <Clock size={14} className="text-gray-600" />
+                          <span className="font-mono text-sm text-gray-300">{selectedItem.timestamp ? new Date(selectedItem.timestamp * 1000).toLocaleString() : "Just now"}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Sidebar */}
+              <div className="space-y-6">
+                <div className="explorer-card p-8">
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="p-2 bg-white/5 rounded-lg"><Database size={16} className="text-gray-400" /></div>
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-white">Technical Data</h3>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div>
+                      <div className="text-[10px] uppercase text-gray-600 font-bold mb-1">Transaction Type</div>
+                      <div className="text-sm font-bold bg-white/5 inline-block px-3 py-1 rounded border border-white/5">
+                        {selectedItem.tx_type || "Standard Transfer"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase text-gray-600 font-bold mb-1">Nonce</div>
+                      <div className="font-mono text-sm text-gray-400">#{selectedItem.nonce}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase text-gray-600 font-bold mb-1">Signature Hash</div>
+                      <div className="font-mono text-[10px] leading-relaxed text-gray-500 break-all bg-black/20 p-3 rounded-lg border border-white/5">
+                        {selectedItem.signature ? Array.from(selectedItem.signature).slice(0, 32).map((b: any) => b.toString(16).padStart(2, '0')).join('') : 'N/A'}...
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="explorer-card p-8 bg-gradient-to-br from-red-900/10 to-transparent border-red-500/10">
+                  <div className="flex items-center gap-3 mb-4">
+                    <ShieldCheck size={16} className="text-red-500" />
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-red-400">Compliance Check</h3>
+                  </div>
+                  <div className="space-y-3">
+                    {['KYC Verified', 'Anti-Money Laundering', 'Jurisdiction Clear'].map((check, i) => (
+                      <div key={i} className="flex items-center gap-3 text-xs text-green-400/80 font-medium">
+                        <CheckCircle2 size={12} /> {check}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      )}
 
       {/* Footer */}
       <footer className="border-t border-white/5 bg-black py-20 px-8">
@@ -328,11 +463,13 @@ export default function AureumExplorer() {
           </div>
         </div>
       </footer>
-    </div>
+    </div >
   );
 }
 
-function BlockRow({ number, i, onClick }: { number: number, i: number, onClick: () => void }) {
+function BlockRow({ number, timestamp, txCount, i, onClick }: { number: number, timestamp: number, txCount: number, i: number, onClick: () => void }) {
+  const timeAgo = Math.floor(Date.now() / 1000) - timestamp;
+
   return (
     <div onClick={onClick} className="explorer-card group cursor-pointer p-6 flex items-center gap-6">
       <div className="w-14 h-14 rounded-2xl bg-white/5 flex items-center justify-center text-red-500 group-hover:bg-red-600 group-hover:text-white transition-all shadow-inner"><Box size={24} /></div>
@@ -342,30 +479,40 @@ function BlockRow({ number, i, onClick }: { number: number, i: number, onClick: 
           <span className="text-[10px] bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded font-bold uppercase tracking-widest">Finalized</span>
         </div>
         <div className="text-xs text-gray-500 flex items-center gap-4">
-          <span className="flex items-center gap-1"><Clock size={12} /> {i * 12 + 2}s ago</span>
+          <span className="flex items-center gap-1"><Clock size={12} /> {timeAgo < 60 ? 'Just now' : `${Math.floor(timeAgo / 60)}m ago`}</span>
         </div>
       </div>
       <div className="text-right">
-        <div className="text-lg font-bold font-premium tracking-tighter">42 TXNS</div>
+        <div className="text-lg font-bold font-premium tracking-tighter uppercase">{txCount} <span className="text-[10px] opacity-40">Assets</span></div>
       </div>
     </div>
   );
 }
 
-function TxRow({ i, onClick }: { i: number, onClick: () => void }) {
+function TxRow({ tx, onClick }: { tx: any, onClick: () => void }) {
+  const isEscrow = tx.tx_type === 'EscrowPayment' || (tx.tx_type && tx.tx_type.EscrowPayment);
+
   return (
     <div onClick={onClick} className="explorer-card group cursor-pointer p-6 flex items-center gap-6 border-l-2 border-l-red-500/0 hover:border-l-red-500 transition-all">
-      <div className="w-14 h-14 rounded-2xl bg-white/5 flex items-center justify-center text-gray-500 group-hover:text-red-500 transition-colors">{i % 3 === 0 ? <Home size={24} /> : <Zap size={24} />}</div>
+      <div className="w-14 h-14 rounded-2xl bg-white/5 flex items-center justify-center text-gray-500 group-hover:text-red-500 transition-colors">{isEscrow ? <Home size={24} /> : <Zap size={24} />}</div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-sm font-bold text-gray-300 truncate lowercase font-mono">aur_tx_8d24b6...0f2a</span>
-          {i % 3 === 0 && <span className="text-[8px] bg-red-600 text-white px-2 py-0.5 rounded-full font-bold uppercase">Escrow</span>}
+          <span className="text-sm font-bold text-gray-300 truncate lowercase font-mono">{tx.hash}</span>
+          {isEscrow && <span className="text-[8px] bg-red-600 text-white px-2 py-0.5 rounded-full font-bold uppercase">Escrow</span>}
+          <span className="text-[10px] bg-white/5 text-gray-500 px-2 py-0.5 rounded uppercase font-bold tracking-widest">Block #{tx.blockHeight}</span>
         </div>
-        <div className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">From aur1k...9m To aur1p...x2</div>
+        <div className="text-[10px] text-gray-500 uppercase tracking-widest font-bold flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <span className="opacity-40">FROM</span> <span className="text-gray-400 font-mono tracking-normal">{tx.sender}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="opacity-40">TO</span> <span className="text-red-500/60 font-mono tracking-normal">{tx.receiver}</span>
+          </div>
+        </div>
       </div>
-      <div className="text-right">
-        <div className={`text-xl font-bold font-premium tracking-tighter ${i % 3 === 0 ? "text-red-500" : "text-white"}`}>{i % 3 === 0 ? "45k AUR" : "1.2k AUR"}</div>
-        <div className="text-[10px] text-gray-600 font-bold uppercase">€{i % 3 === 0 ? "500k" : "2.4k"}</div>
+      <div className="text-right min-w-[120px]">
+        <div className={`text-xl font-bold font-premium tracking-tighter ${isEscrow ? "text-red-500" : "text-white"}`}>{tx.amount.toLocaleString()} AUR</div>
+        <div className="text-[10px] text-gray-600 font-bold uppercase">Fee: {tx.fee} AUR</div>
       </div>
     </div>
   );

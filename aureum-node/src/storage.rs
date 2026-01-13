@@ -1,5 +1,6 @@
 use sled::Db;
-use crate::core::{Block, Transaction};
+use crate::core::Block;
+use crate::compliance::ComplianceProfile;
 use parity_scale_codec::{Encode, Decode};
 use std::sync::Arc;
 
@@ -21,6 +22,20 @@ impl ChainStorage {
         // Save block hash for lookup
         let hash = block.hash();
         self.db.insert(format!("hash:{}", hash).as_bytes(), &block.header.height.to_be_bytes()).expect("Failed to save hash index");
+        
+        // Update latest height
+        self.db.insert(b"height:latest", &block.header.height.to_be_bytes()).expect("Failed to update latest height");
+    }
+
+    pub fn get_latest_height(&self) -> u64 {
+        match self.db.get(b"height:latest").ok().flatten() {
+            Some(data) => {
+                let mut bytes = [0u8; 8];
+                bytes.copy_from_slice(&data);
+                u64::from_be_bytes(bytes)
+            },
+            None => 0,
+        }
     }
 
     pub fn get_block(&self, height: u64) -> Option<Block> {
@@ -65,18 +80,18 @@ impl ChainStorage {
 
     // --- EVM State Persistence ---
 
-    pub fn get_account_code(&self, address: &[u8; 20]) -> Vec<u8> {
+    pub fn get_account_code(&self, address: [u8; 20]) -> Vec<u8> {
         self.db.get(format!("code:{:x?}", address).as_bytes())
             .ok().flatten()
             .map(|v| v.to_vec())
             .unwrap_or_default()
     }
 
-    pub fn save_account_code(&self, address: &[u8; 20], code: Vec<u8>) {
+    pub fn save_account_code(&self, address: [u8; 20], code: Vec<u8>) {
         self.db.insert(format!("code:{:x?}", address).as_bytes(), code).expect("Sled error");
     }
 
-    pub fn get_storage_slot(&self, address: &[u8; 20], slot: &[u8; 32]) -> [u8; 32] {
+    pub fn get_storage_slot(&self, address: [u8; 20], slot: [u8; 32]) -> [u8; 32] {
         let key = format!("storage:{:x?}:{:x?}", address, slot);
         match self.db.get(key.as_bytes()).ok().flatten() {
             Some(data) => {
@@ -88,7 +103,7 @@ impl ChainStorage {
         }
     }
 
-    pub fn save_storage_slot(&self, address: &[u8; 20], slot: &[u8; 32], value: [u8; 32]) {
+    pub fn save_storage_slot(&self, address: [u8; 20], slot: [u8; 32], value: [u8; 32]) {
         let key = format!("storage:{:x?}:{:x?}", address, slot);
         self.db.insert(key.as_bytes(), &value[..]).expect("Sled error");
     }
@@ -116,30 +131,62 @@ impl ChainStorage {
         self.db.get(format!("visa:{}", applicant).as_bytes()).ok()?.and_then(|data| crate::core::VisaApplication::decode(&mut &data[..]).ok())
     }
 
-    /// Calculate Deterministic State Root (Section 1.2.E)
+    // --- Compliance Persistence ---
+
+    pub fn save_compliance_profile(&self, profile: &ComplianceProfile) {
+        let encoded = profile.encode();
+        self.db.insert(format!("compliance:{}", profile.address).as_bytes(), encoded).expect("Failed to save compliance profile");
+    }
+
+    pub fn get_compliance_profile(&self, address: &str) -> Option<ComplianceProfile> {
+        self.db.get(format!("compliance:{}", address).as_bytes()).ok()?.and_then(|data| ComplianceProfile::decode(&mut &data[..]).ok())
+    }
+
+    // --- Oracle Persistence ---
+
+    pub fn save_oracle_price(&self, asset_id: &str, price: u64) {
+        self.db.insert(format!("oracle_price:{}", asset_id).as_bytes(), &price.to_be_bytes()).expect("Failed to save oracle price");
+    }
+
+    pub fn get_oracle_price(&self, asset_id: &str) -> Option<u64> {
+        match self.db.get(format!("oracle_price:{}", asset_id).as_bytes()).ok().flatten() {
+            Some(data) => {
+                let mut bytes = [0u8; 8];
+                bytes.copy_from_slice(&data);
+                Some(u64::from_be_bytes(bytes))
+            },
+            None => None,
+        }
+    }
+
+    /// Calculate Deterministic State Root
     pub fn calculate_state_root(&self) -> String {
         use sha3::{Digest, Keccak256};
         let mut hasher = Keccak256::new();
         
-        // Institutional hack: Iterate over all keys starting with 'balance:' and 'property:'
-        // For production, this would use a Merkle Patricia Trie
-        for item in self.db.scan_prefix(b"balance:") {
-            if let Ok((k, v)) = item {
-                hasher.update(k);
-                hasher.update(v);
+        let mut items = Vec::new();
+        
+        // Scan all state-relevant prefixes
+        for prefix in &[&b"balance:"[..], &b"property:"[..], &b"nonce:"[..], &b"compliance:"[..], &b"oracle_price:"[..]] {
+            for item in self.db.scan_prefix(*prefix) {
+                if let Ok((k, v)) = item {
+                    items.push((k.to_vec(), v.to_vec()));
+                }
             }
         }
-        for item in self.db.scan_prefix(b"property:") {
-            if let Ok((k, v)) = item {
-                hasher.update(k);
-                hasher.update(v);
-            }
+        
+        // Must sort for determinism
+        items.sort_by(|a, b| a.0.cmp(&b.0));
+
+        for (k, v) in items {
+            hasher.update(&k);
+            hasher.update(&v);
         }
         
         hex::encode(hasher.finalize())
     }
 
-    // --- Nonce Management (Section 1.2.C) ---
+    // --- Nonce Management ---
 
     pub fn get_nonce(&self, address: &str) -> u64 {
         let key = format!("nonce:{}", address);
@@ -159,7 +206,7 @@ impl ChainStorage {
         self.db.insert(key.as_bytes(), &(current + 1).to_be_bytes()).expect("Sled error");
     }
 
-    // --- Multi-Sig Storage (Section 1.2.D) ---
+    // --- Multi-Sig Storage ---
 
     pub fn save_multisig(&self, account: &crate::core::MultiSigAccount) {
         let encoded = account.encode();
@@ -168,5 +215,10 @@ impl ChainStorage {
 
     pub fn get_multisig(&self, address: &str) -> Option<crate::core::MultiSigAccount> {
         self.db.get(format!("multisig:{}", address).as_bytes()).ok()?.and_then(|data| crate::core::MultiSigAccount::decode(&mut &data[..]).ok())
+    }
+
+    /// Flush all pending writes to disk
+    pub fn flush(&self) {
+        self.db.flush().expect("Failed to flush database");
     }
 }

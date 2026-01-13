@@ -1,8 +1,11 @@
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use log::{info, warn};
+use std::sync::Arc;
+use crate::storage::ChainStorage;
+use parity_scale_codec::{Encode, Decode};
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash, Encode, Decode)]
 pub enum Jurisdiction {
     Portugal,
     UAE,
@@ -10,7 +13,7 @@ pub enum Jurisdiction {
     Global,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
 pub struct ComplianceProfile {
     pub address: String,
     pub jurisdiction: Jurisdiction,
@@ -20,8 +23,7 @@ pub struct ComplianceProfile {
 }
 
 pub struct ComplianceEngine {
-    // In a real implementation, this would be backed by a Merkle Patricia Trie
-    profiles: HashMap<String, ComplianceProfile>,
+    storage: Arc<ChainStorage>,
     jurisdiction_rules: HashMap<Jurisdiction, JurisdictionRules>,
 }
 
@@ -33,7 +35,7 @@ pub struct JurisdictionRules {
 }
 
 impl ComplianceEngine {
-    pub fn new() -> Self {
+    pub fn new(storage: Arc<ChainStorage>) -> Self {
         let mut jurisdiction_rules = HashMap::new();
         
         // Define Institutional Rules for Portugal (Golden Visa compliant)
@@ -51,40 +53,52 @@ impl ComplianceEngine {
         });
 
         Self {
-            profiles: HashMap::new(),
+            storage,
             jurisdiction_rules,
         }
     }
 
-    pub fn register_profile(&mut self, profile: ComplianceProfile) {
+    pub fn register_profile(&self, profile: ComplianceProfile) {
         info!("Registering compliance profile for {}", profile.address);
-        self.profiles.insert(profile.address.clone(), profile);
+        self.storage.save_compliance_profile(&profile);
     }
 
-    pub fn verify_transaction(&self, from: &str, to: &str, amount: u64, jurisdiction: Jurisdiction) -> bool {
-        let from_profile = self.profiles.get(from);
-        let rules = self.jurisdiction_rules.get(&jurisdiction).unwrap();
+    pub fn verify_transaction(&self, from: &str, _to: &str, amount: u64, jurisdiction: Jurisdiction, current_time: u64) -> bool {
+        let from_profile = self.storage.get_compliance_profile(from);
+        let rules = self.jurisdiction_rules.get(&jurisdiction).unwrap_or(&JurisdictionRules {
+            min_kyc_level: 0,
+            max_transfer_amount: u64::MAX,
+            holding_period_sec: 0,
+        });
 
         // 1. Check KYC Level
         if let Some(profile) = from_profile {
             if !profile.is_verified || profile.kyc_level < rules.min_kyc_level {
-                warn!("Compliance Reject: Insufficient KYC for {}", from);
+                warn!("Institutional Reject: KYC Level {} < Required {} for {}", profile.kyc_level, rules.min_kyc_level, from);
                 return false;
             }
 
-            // 2. Check Holding Period (Simulated)
-            // if profile.last_updated + rules.holding_period_sec > current_time { ... }
+            // 2. Check Holding Period for institutional assets (Golden Visa compliance)
+            if profile.last_updated + rules.holding_period_sec > current_time {
+                let remaining = (profile.last_updated + rules.holding_period_sec) - current_time;
+                warn!("Institutional Reject: Asset locked for Golden Visa compliance. {}s remaining", remaining);
+                return false;
+            }
 
             // 3. Check Amount Limits
             if amount > rules.max_transfer_amount {
-                warn!("Compliance Reject: Amount exceeds jurisdiction limit");
+                warn!("Institutional Reject: Amount {} exceeds €{} limit for {:?}", amount, rules.max_transfer_amount, jurisdiction);
                 return false;
             }
 
-            info!("Compliance Approval: Tx from {} to {} verified", from, to);
+            info!("Institutional Approval: COMPLIANT tx from {} in jurisdiction {:?}", from, jurisdiction);
             true
         } else {
-            warn!("Compliance Reject: Sender profile not found for {}", from);
+            // Default: If no profile exists, only allow small transfers globally
+            if jurisdiction == Jurisdiction::Global && amount < 1000000 { // Allow up to 1M AUR for non-institutional
+                return true;
+            }
+            warn!("Institutional Reject: No compliance profile found for {}", from);
             false
         }
     }

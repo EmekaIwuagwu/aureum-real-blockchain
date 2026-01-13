@@ -1,29 +1,28 @@
-use crate::core::{Transaction, TransactionType, VisaProgram};
-use crate::storage::ChainStorage;
-use crate::vm::AureumVM;
+use aureum_node::core::{Transaction, TransactionType, VisaProgram};
+use aureum_node::storage::ChainStorage;
+use aureum_node::vm::AureumVM;
+use aureum_node::compliance::{ComplianceEngine, ComplianceProfile, Jurisdiction};
 use ed25519_dalek::{SigningKey, Signer};
-use rand::rngs::OsRng;
+use rand_core::OsRng;
 use std::sync::Arc;
 use parity_scale_codec::Encode;
 
 #[tokio::test]
 async fn test_system_wide_operations() {
     // 1. Setup Environment
-    // Use a temp path for Sled DB to avoid pollution
     let db_path = "test_data/system_test_db";
-    let _ = std::fs::remove_dir_all(db_path); // Clean start
+    let _ = std::fs::remove_dir_all(db_path);
     let storage = Arc::new(ChainStorage::new(db_path));
-    let vm = AureumVM::new(storage.clone());
+    let compliance = Arc::new(ComplianceEngine::new(storage.clone()));
+    let vm = AureumVM::new(storage.clone(), compliance.clone());
 
     // 2. Setup Wallets (Genesis & Alice)
     let mut csprng = OsRng;
     let genesis_key = SigningKey::generate(&mut csprng);
-    let genesis_pub = genesis_key.verifying_key();
-    let genesis_addr = crate::core::generate_address(genesis_pub.as_bytes());
+    let genesis_addr = aureum_node::core::generate_address(genesis_key.verifying_key().as_bytes());
 
     let alice_key = SigningKey::generate(&mut csprng);
-    let alice_pub = alice_key.verifying_key();
-    let alice_addr = crate::core::generate_address(alice_pub.as_bytes());
+    let alice_addr = aureum_node::core::generate_address(alice_key.verifying_key().as_bytes());
 
     println!("Genesis: {}", genesis_addr);
     println!("Alice:   {}", alice_addr);
@@ -39,19 +38,21 @@ async fn test_system_wide_operations() {
         amount: 500_000,
         nonce: 0,
         fee: 100,
-        signature: vec![], // To be signed
+        signature: vec![],
+        pub_key: genesis_key.verifying_key().to_bytes().to_vec(),
         tx_type: TransactionType::Transfer,
     };
     
     // Sign TX1
-    let msg1 = [
-        tx1.sender.as_bytes(),
-        tx1.receiver.as_bytes(),
-        &tx1.amount.to_be_bytes(),
-        &tx1.nonce.to_be_bytes(),
-        &tx1.fee.to_be_bytes(),
-        &tx1.tx_type.encode(),
-    ].concat();
+    let mut msg1 = Vec::new();
+    msg1.extend_from_slice(tx1.sender.as_bytes());
+    msg1.extend_from_slice(tx1.receiver.as_bytes());
+    msg1.extend_from_slice(&tx1.amount.to_be_bytes());
+    msg1.extend_from_slice(&tx1.nonce.to_be_bytes());
+    msg1.extend_from_slice(&tx1.fee.to_be_bytes());
+    msg1.extend_from_slice(&tx1.pub_key);
+    msg1.extend_from_slice(&tx1.tx_type.encode());
+    
     tx1.signature = genesis_key.sign(&msg1).to_vec();
 
     // Execute TX1
@@ -77,26 +78,28 @@ async fn test_system_wide_operations() {
         nonce: 0,
         fee: 500,
         signature: vec![],
+        pub_key: alice_key.verifying_key().to_bytes().to_vec(),
         tx_type: TransactionType::TokenizeProperty { 
             address: prop_addr.clone(), 
             metadata: prop_metadata.clone() 
         },
     };
 
-    let msg2 = [
-        tx2.sender.as_bytes(),
-        tx2.receiver.as_bytes(),
-        &tx2.amount.to_be_bytes(),
-        &tx2.nonce.to_be_bytes(),
-        &tx2.fee.to_be_bytes(),
-        &tx2.tx_type.encode(),
-    ].concat();
+    let mut msg2 = Vec::new();
+    msg2.extend_from_slice(tx2.sender.as_bytes());
+    msg2.extend_from_slice(tx2.receiver.as_bytes());
+    msg2.extend_from_slice(&tx2.amount.to_be_bytes());
+    msg2.extend_from_slice(&tx2.nonce.to_be_bytes());
+    msg2.extend_from_slice(&tx2.fee.to_be_bytes());
+    msg2.extend_from_slice(&tx2.pub_key);
+    msg2.extend_from_slice(&tx2.tx_type.encode());
+    
     tx2.signature = alice_key.sign(&msg2).to_vec();
 
     // Execute TX2
     assert!(tx2.verify_signature());
     
-    let prop = crate::core::Property {
+    let prop = aureum_node::core::Property {
         id: format!("prop_{}", tx2.nonce),
         owner: tx2.sender.clone(),
         co_owners: vec![],
@@ -131,20 +134,22 @@ async fn test_system_wide_operations() {
         nonce: 1, // Incremented
         fee: 50,
         signature: vec![],
+        pub_key: alice_key.verifying_key().to_bytes().to_vec(),
         tx_type: TransactionType::ApplyForVisa { 
             property_id: saved_prop.id.clone(), 
             program: VisaProgram::Portugal 
         },
     };
 
-    let msg3 = [
-        tx3.sender.as_bytes(),
-        tx3.receiver.as_bytes(),
-        &tx3.amount.to_be_bytes(),
-        &tx3.nonce.to_be_bytes(),
-        &tx3.fee.to_be_bytes(),
-        &tx3.tx_type.encode(),
-    ].concat();
+    let mut msg3 = Vec::new();
+    msg3.extend_from_slice(tx3.sender.as_bytes());
+    msg3.extend_from_slice(tx3.receiver.as_bytes());
+    msg3.extend_from_slice(&tx3.amount.to_be_bytes());
+    msg3.extend_from_slice(&tx3.nonce.to_be_bytes());
+    msg3.extend_from_slice(&tx3.fee.to_be_bytes());
+    msg3.extend_from_slice(&tx3.pub_key);
+    msg3.extend_from_slice(&tx3.tx_type.encode());
+    
     tx3.signature = alice_key.sign(&msg3).to_vec();
 
     // Execute TX3
@@ -152,12 +157,12 @@ async fn test_system_wide_operations() {
 
     if let Some(p) = storage.get_property(&saved_prop.id) {
         if p.owner == tx3.sender {
-            let app = crate::core::VisaApplication {
+            let app = aureum_node::core::VisaApplication {
                 applicant: tx3.sender.clone(),
                 property_id: p.id.clone(),
                 investment_amount: p.valuation_eur,
                 program: VisaProgram::Portugal,
-                status: crate::core::ApplicationStatus::Pending,
+                status: aureum_node::core::ApplicationStatus::Pending,
                 timestamp: 1234567899,
             };
             storage.save_visa_application(&app);
@@ -168,7 +173,7 @@ async fn test_system_wide_operations() {
     // Verify Visa
     let saved_app = storage.get_visa_application(&alice_addr).expect("Visa app not found");
     assert_eq!(saved_app.property_id, "prop_0");
-    assert_eq!(saved_app.status, crate::core::ApplicationStatus::Pending);
+    assert_eq!(saved_app.status, aureum_node::core::ApplicationStatus::Pending);
 
     // 7. Calculate State Root
     let root = storage.calculate_state_root();

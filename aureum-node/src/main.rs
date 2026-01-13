@@ -1,506 +1,436 @@
-use aureum_node::{core, consensus, storage, network, vm, compliance, oracle};
-use aureum_node::core::{Transaction, TransactionType, Block, Validator, ValidatorRole, ValidatorSet};
+use aureum_node::core::{Transaction, Block, Validator, ValidatorRole, ValidatorSet, ChainState, BlockHeader, TransactionType};
 use aureum_node::storage::ChainStorage;
-use aureum_node::consensus::ConsensusEngine;
+use aureum_node::consensus::{ConsensusEngine, BftStep};
 use aureum_node::vm::AureumVM;
-use aureum_node::compliance::{ComplianceEngine, ComplianceProfile, Jurisdiction};
-use aureum_node::oracle::{AureumOracle, OracleReport};
-use aureum_node::network::{P2PNetwork, TOPIC_TRANSACTIONS, TOPIC_BLOCKS};
-use futures::StreamExt;
-use libp2p::swarm::SwarmEvent;
-use parity_scale_codec::Decode;
+use aureum_node::compliance::{ComplianceEngine};
+use aureum_node::oracle::{AureumOracle};
+use aureum_node::network::{P2PNetwork, TOPIC_TRANSACTIONS, TOPIC_BLOCKS, TOPIC_CONSENSUS};
+use clap::{Parser, Subcommand};
 use log::{info, warn, error};
-use jsonrpc_http_server::jsonrpc_core::{IoHandler, Value, Params};
-use jsonrpc_http_server::ServerBuilder;
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
+use jsonrpc_http_server::jsonrpc_core::{IoHandler, Value, Params};
+use jsonrpc_http_server::ServerBuilder;
+use parity_scale_codec::{Encode, Decode};
+use futures::StreamExt;
+use libp2p::gossipsub;
+
+#[derive(Parser)]
+#[command(name = "aureum-node")]
+#[command(about = "Aureum Layer 1 Blockchain Node", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Run {
+        #[arg(short, long, default_value = "8545")]
+        rpc_port: u16,
+        #[arg(short, long, default_value = "./data")]
+        data_dir: String,
+        #[arg(short, long)]
+        validator: bool,
+    },
+    Init {
+        #[arg(short, long, default_value = "./data")]
+        data_dir: String,
+    },
+}
 
 #[tokio::main]
 async fn main() {
     env_logger::init();
-    info!("Aureum Chain Node starting...");
+    let cli = Cli::parse();
 
-    let storage = Arc::new(ChainStorage::new("./data/blockchain"));
-    
-    // P2P Network Setup
-    let mut network = P2PNetwork::new().await.expect("Failed to initialize P2P");
-    network.subscribe(TOPIC_TRANSACTIONS);
-    network.subscribe(TOPIC_BLOCKS);
-    
-    let (tx_sender, mut tx_receiver) = mpsc::channel::<Vec<u8>>(100);
-    let peer_count = Arc::new(Mutex::new(0usize));
-    let peer_count_clone = peer_count.clone();
-
-    // Swarm Event Loop Task
-    tokio::spawn(async move {
-        let mut swarm = network.swarm;
-        loop {
-            tokio::select! {
-                Some(event) = swarm.next() => match event {
-                    SwarmEvent::Behaviour(network::AureumBehaviourEvent::Mdns(event)) => {
-                        if let libp2p::mdns::Event::Discovered(list) = event {
-                            for (peer_id, addr) in list {
-                                info!("Mdns discovered peer: {} at {}", peer_id, addr);
-                                swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
-                            }
-                        }
-                    },
-                    SwarmEvent::ConnectionEstablished { peer_id, .. } => {
-                        info!("Connection established with {}", peer_id);
-                        let mut count = peer_count_clone.lock().await;
-                        *count += 1;
-                    },
-                    SwarmEvent::ConnectionClosed { peer_id, .. } => {
-                        info!("Connection closed with {}", peer_id);
-                        let mut count = peer_count_clone.lock().await;
-                        if *count > 0 { *count -= 1; }
-                    },
-                    _ => {}
-                },
-                Some(msg) = tx_receiver.recv() => {
-                    let topic = libp2p::gossipsub::IdentTopic::new(TOPIC_TRANSACTIONS);
-                    if let Err(e) = swarm.behaviour_mut().gossipsub.publish(topic, msg) {
-                        error!("Broadcasting error: {:?}", e);
-                    }
-                }
-            }
+    match cli.command {
+        Commands::Init { data_dir } => {
+            init_node(&data_dir);
         }
-    });
+        Commands::Run { rpc_port, data_dir, validator: _ } => {
+            run_node(&data_dir, rpc_port).await;
+        }
+    }
+}
 
-    // Initialize Genesis if needed
+fn init_node(data_dir: &str) {
+    info!("Initializing Aureum node at {}...", data_dir);
+    let storage = ChainStorage::new(&format!("{}/blockchain", data_dir));
+    
+    let initial_validator_address = "A1109cd8305ff4145b0b89495431540d1f4faecdc".to_string();
+    
+    // Always create genesis if it doesn't exist
     if storage.get_block(0).is_none() {
-        info!("Initializing Genesis Block...");
         let genesis = Block::new_genesis();
         storage.save_block(&genesis);
+        info!("Genesis block created.");
+    }
+    
+    // Always set up validator if balance is 0 (fresh init or reset)
+    if storage.get_balance(&initial_validator_address) == 0 {
+        let mut pub_key = [0u8; 32];
+        hex::decode_to_slice("3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29", &mut pub_key).expect("Invalid hex");
         
         let initial_validator = Validator {
-            address: "aur1initial_validator_address".to_string(),
-            public_key: vec![0u8; 32],
+            address: initial_validator_address.clone(),
+            public_key: pub_key.to_vec(),
             stake: 1_000_000,
             role: ValidatorRole::Authority,
             last_active: 0,
         };
         let set = ValidatorSet {
-            validators: vec![initial_validator],
+            validators: vec![initial_validator.clone()],
             total_stake: 1_000_000,
         };
         storage.save_validator_set(&set);
-        storage.update_balance("aur1initial_validator_address", 1_000_000);
-        
-        // Initialize Test Accounts for Wallet Demo
-        storage.update_balance("genesis", 200_000_000_000); // Treasury - 200B AUR
-        storage.update_balance("alice", 1_000_000); // Test user - 1M AUR
-        storage.update_balance("bob", 1_000_000); // Test user - 1M AUR
-        storage.update_balance("charlie", 500_000); // Test user - 500K AUR
-        storage.update_balance("diana", 500_000); // Test user - 500K AUR
-        info!("Initialized test accounts: genesis (200B), alice, bob, charlie, diana");
-
-        // Initialize Global State
-        let initial_state = crate::core::ChainState {
-            total_supply: 21_000_000_000, // 21B AUR Max Supply
-            burned_fees: 0,
-        };
-        storage.save_chain_state(&initial_state);
+        info!("Updating validator balance to 1B AUR...");
+        storage.update_balance(&initial_validator.address, 1_000_000_000); // 1B AUR
+        storage.save_chain_state(&ChainState { total_supply: 21_000_000_000, burned_fees: 0 });
+        storage.flush(); // Ensure all data is written to disk
+        info!("Verification: Validator balance is now {}", storage.get_balance(&initial_validator.address));
+        info!("Initial validator funded with 1B AUR.");
+    } else {
+        info!("Validator already has balance: {} AUR", storage.get_balance(&initial_validator_address));
     }
+    
+    info!("� Node initialization complete.");
+}
 
-    let val_set = storage.get_validator_set().expect("Fatal: No validator set found");
-    let engine = Arc::new(Mutex::new(ConsensusEngine::new(val_set)));
-    let vm = Arc::new(AureumVM::new(storage.clone()));
-    let mempool = Arc::new(Mutex::new(Vec::<crate::core::Transaction>::new()));
+async fn run_node(data_dir: &str, rpc_port: u16) {
+    info!("🚀 Aureum Node starting...");
+    let storage = Arc::new(ChainStorage::new(&format!("{}/blockchain", data_dir)));
+    let (_tx_sender, mut _tx_receiver) = mpsc::channel::<Vec<u8>>(1000);
+    
+    // Core Engines
+    let validator_set = storage.get_validator_set().expect("Validator set missing. Run init first.");
+    let compliance = Arc::new(ComplianceEngine::new(storage.clone()));
+    let vm = Arc::new(AureumVM::new(storage.clone(), compliance.clone()));
+    let engine = Arc::new(Mutex::new(ConsensusEngine::new(validator_set)));
+    let mempool = Arc::new(Mutex::new(Vec::<Transaction>::new()));
+    let _oracle = Arc::new(Mutex::new(AureumOracle::new(storage.clone(), vec![])));
 
-    // Specialized Institutional Engines
-    let compliance_engine = Arc::new(Mutex::new(ComplianceEngine::new()));
-    let oracle = Arc::new(Mutex::new(AureumOracle::new(vec!["aur1initial_validator_address".to_string()])));
+    // Network Setup
+    let mut network = P2PNetwork::new().await.expect("Failed to start networking");
+    network.subscribe(TOPIC_TRANSACTIONS);
+    network.subscribe(TOPIC_BLOCKS);
+    network.subscribe(TOPIC_CONSENSUS);
 
-    // Automated Consensus Loop (Priority 1-3 Automation)
+    // Node Event Loop
     let engine_loop = engine.clone();
-    let storage_loop = storage.clone();
     let mempool_loop = mempool.clone();
+    let storage_loop = storage.clone();
     let vm_loop = vm.clone();
     
     tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(3)).await; // 3s per step
-            let mut engine = engine_loop.lock().await;
-            
-            match engine.step {
-                crate::consensus::BftStep::Propose => {
-                    let proposer = engine.select_proposer();
-                    info!("Consensus [Height {}]: Proposer {} proposing block...", engine.height, proposer);
-                    engine.next_step(&storage_loop, None);
-                },
-                crate::consensus::BftStep::Prevote => {
-                    info!("Consensus [Height {}]: Aggregating Pre-votes...", engine.height);
-                    engine.next_step(&storage_loop, None);
-                },
-                crate::consensus::BftStep::Precommit => {
-                    info!("Consensus [Height {}]: Finalizing Pre-commits...", engine.height);
-                    engine.next_step(&storage_loop, None);
-                },
-                crate::consensus::BftStep::Commit => {
-                    info!("Consensus [Height {}]: COMMITTING to state...", engine.height);
-                    
-                    // 1. Process Mempool
-                    let mut txs_lock = mempool_loop.lock().await;
-                    let current_txs = txs_lock.drain(..).collect::<Vec<_>>();
-                    
-                    // Get current timestamp for all operations
-                    let current_timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-                    
-                    // 2. Execute Transactions in AVM
-                    for tx in &current_txs {
-                        // Anti-Replay Protection (Section 1.2.C)
-                        let current_nonce = storage_loop.get_nonce(&tx.sender);
-                        if tx.nonce != current_nonce {
-                            warn!("Skipping transaction from {}: Invalid nonce (Expected {}, Got {})", tx.sender, current_nonce, tx.nonce);
-                            continue;
+            tokio::select! {
+                // Handle P2P Network Events
+                event = network.swarm.next() => {
+                    if let Some(event) = event {
+                        match event {
+                            libp2p::swarm::SwarmEvent::Behaviour(aureum_node::network::AureumBehaviourEvent::Gossipsub(gossipsub::Event::Message {
+                                message, ..
+                            })) => {
+                                let topic = message.topic.as_str();
+                                if topic == TOPIC_TRANSACTIONS {
+                                    if let Ok(tx) = Transaction::decode(&mut &message.data[..]) {
+                                        let mut mempool = mempool_loop.lock().await;
+                                        if !mempool.iter().any(|existing| existing.hash() == tx.hash()) {
+                                            if vm_loop.verify_compliance(&tx) {
+                                                mempool.push(tx);
+                                            }
+                                        }
+                                    }
+                                } else if topic == TOPIC_BLOCKS {
+                                    if let Ok(block) = Block::decode(&mut &message.data[..]) {
+                                        // Simple block acceptance (Real: verify consensus)
+                                        storage_loop.save_block(&block);
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
+                    }
+                }
+                
+                // Handle Consensus Ticks
+                _ = interval.tick() => {
+                    let mut engine = engine_loop.lock().await;
 
-                        match tx.tx_type {
-                            aureum_node::core::TransactionType::Transfer => {
-                                let balance_from = storage_loop.get_balance(&tx.sender);
-                                if balance_from >= tx.amount + tx.fee {
-                                    storage_loop.update_balance(&tx.sender, balance_from - (tx.amount + tx.fee));
-                                    let balance_to = storage_loop.get_balance(&tx.receiver);
-                                    storage_loop.update_balance(&tx.receiver, balance_to + tx.amount);
-                                    storage_loop.increment_nonce(&tx.sender);
-                                }
-                            },
-                            aureum_node::core::TransactionType::TokenizeProperty { ref address, ref metadata } => {
-                                // Phase 2 MVP: Create persistent property record
-                                let prop = aureum_node::core::Property {
-                                    id: format!("prop_{}", tx.nonce),
-                                    owner: tx.sender.clone(),
-                                    co_owners: vec![],
-                                    jurisdiction: "Portugal".to_string(), // Default for Phase 1
-                                    legal_description: address.clone(),
-                                    coordinates: (0.0, 0.0),
-                                    valuation_eur: tx.amount,
-                                    valuation_timestamp: current_timestamp,
-                                    valuation_oracle: "system".to_string(),
-                                    title_deed_hash: metadata.clone(),
-                                    survey_hash: "".to_string(),
-                                    visa_program_eligible: true,
-                                    minimum_investment_met: tx.amount >= 500_000, // 500k threshold
-                                    kyc_status: 1,
-                                    aml_cleared: true,
-                                    mortgages: vec![],
-                                    liens: vec![],
-                                };
-                                storage_loop.save_property(&prop);
-                                storage_loop.increment_nonce(&tx.sender);
-                                info!("PROPERTY REGISTERED: {} (Owner: {})", prop.id, prop.owner);
-                            },
-                            aureum_node::core::TransactionType::ApplyForVisa { ref property_id, ref program } => {
-                                // Phase 2: Link property ownership to visa application
-                                if let Some(prop) = storage_loop.get_property(property_id) {
-                                    if prop.owner == tx.sender {
-                                        let app = aureum_node::core::VisaApplication {
-                                            applicant: tx.sender.clone(),
-                                            property_id: property_id.clone(),
-                                            investment_amount: prop.valuation_eur,
-                                            program: program.clone(),
-                                            status: aureum_node::core::ApplicationStatus::Pending,
-                                            timestamp: current_timestamp,
-                                        };
-                                        storage_loop.save_visa_application(&app);
-                                        storage_loop.increment_nonce(&tx.sender);
-                                        info!("VISA APPLICATION SUBMITTED: Applicant {} for Property {}", app.applicant, app.property_id);
+                    match engine.step {
+                        BftStep::Propose => {
+                            let proposer = engine.select_proposer();
+                            info!("Consensus: Proposer {} for height {}", proposer, engine.height);
+                            
+                            let mut txs = mempool_loop.lock().await;
+                            if !txs.is_empty() {
+                                let mut compliant_txs = Vec::new();
+                                for tx in txs.drain(..) {
+                                    if vm_loop.verify_compliance(&tx) {
+                                        compliant_txs.push(tx);
                                     }
                                 }
-                            },
-                            aureum_node::core::TransactionType::ContractCreate { ref bytecode } => {
-                                // Institutional execution of Solidity/Quorlin Bytecode
-                                match vm_loop.execute_transaction(&tx.sender, "0x0000000000000000000000000000000000000000", bytecode.clone(), tx.amount) {
-                                    Ok(_) => {
-                                        storage_loop.increment_nonce(&tx.sender);
-                                        info!("CONTRACT DEPLOYED by {}", tx.sender);
-                                    },
-                                    Err(e) => warn!("Contract deployment failed: {}", e),
+
+                                if !compliant_txs.is_empty() {
+                                    let mut block = Block {
+                                        header: BlockHeader {
+                                            parent_hash: storage_loop.get_block(engine.height - 1).map(|b| b.hash()).unwrap_or_default(),
+                                            timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+                                            height: engine.height,
+                                            state_root: storage_loop.calculate_state_root(),
+                                            tx_merkle_root: "".into(),
+                                        },
+                                        transactions: compliant_txs,
+                                    };
+                                    block.header.tx_merkle_root = block.calculate_merkle_root();
+                                    
+                                    // Broadcast block
+                                    network.broadcast(TOPIC_BLOCKS, block.encode());
+                                    engine.set_proposal(block);
                                 }
-                            },
-                            aureum_node::core::TransactionType::ContractCall { ref target, ref data } => {
-                                // Institutional interaction with smart contract state
-                                match vm_loop.execute_transaction(&tx.sender, target, data.clone(), tx.amount) {
-                                    Ok(_) => {
-                                        storage_loop.increment_nonce(&tx.sender);
-                                        info!("CONTRACT CALL successful to {} from {}", target, tx.sender);
-                                    },
-                                    Err(e) => warn!("Contract call failed: {}", e),
-                                }
-                            },
-                            // Advanced Property Operations
-                            aureum_node::core::TransactionType::AddMortgage { ref property_id, ref details } => {
-                                if let Some(mut prop) = storage_loop.get_property(property_id) {
-                                    if prop.owner == tx.sender {
-                                        prop.mortgages.push(details.clone());
-                                        storage_loop.save_property(&prop);
-                                        storage_loop.increment_nonce(&tx.sender);
-                                        info!("MORTGAGE ADDED to Property {}", property_id);
+                            }
+                            engine.next_step(&storage_loop, None);
+                        }
+                        BftStep::Prevote | BftStep::Precommit => {
+                            engine.next_step(&storage_loop, None);
+                        }
+                        BftStep::Commit => {
+                            if let Some(block) = engine.proposal.clone() {
+                                info!("🔗 Committing block {} with {} transactions", block.header.height, block.transactions.len());
+                                
+                                for tx in &block.transactions {
+                                    if !vm_loop.verify_compliance(tx) {
+                                        warn!("⚠️  Tx Failed Compliance: {} -> {}", tx.sender, tx.receiver);
+                                        continue;
+                                    }
+
+                                    match &tx.tx_type {
+                                        TransactionType::Transfer => {
+                                            // Simple AUR transfer - direct balance update (no EVM needed)
+                                            let sender_balance = storage_loop.get_balance(&tx.sender);
+                                            let total_cost = tx.amount + tx.fee;
+                                            
+                                            if sender_balance >= total_cost {
+                                                storage_loop.update_balance(&tx.sender, sender_balance - total_cost);
+                                                let receiver_balance = storage_loop.get_balance(&tx.receiver);
+                                                storage_loop.update_balance(&tx.receiver, receiver_balance + tx.amount);
+                                                storage_loop.increment_nonce(&tx.sender);
+                                                info!("✅ Transfer: {} -> {} ({} AUR, fee: {})", tx.sender, tx.receiver, tx.amount, tx.fee);
+                                            } else {
+                                                error!("❌ Insufficient balance: {} has {} but needs {}", tx.sender, sender_balance, total_cost);
+                                            }
+                                        }
+                                        
+                                        TransactionType::ContractCall { data, target } => {
+                                            // EVM contract call
+                                            match vm_loop.execute_transaction(&tx.sender, target, data.clone(), tx.amount) {
+                                                Ok(_) => {
+                                                    info!("✅ Contract Call: {} -> {} ({} AUR)", tx.sender, target, tx.amount);
+                                                    storage_loop.increment_nonce(&tx.sender);
+                                                }
+                                                Err(e) => error!("❌ Contract Call Failed: {}", e),
+                                            }
+                                        }
+                                        
+                                        TransactionType::ContractCreate { bytecode } => {
+                                            // EVM contract deployment
+                                            match vm_loop.execute_transaction(&tx.sender, "0", bytecode.clone(), tx.amount) {
+                                                Ok(_) => {
+                                                    info!("✅ Contract Deployed by {}", tx.sender);
+                                                    storage_loop.increment_nonce(&tx.sender);
+                                                }
+                                                Err(e) => error!("❌ Contract Deploy Failed: {}", e),
+                                            }
+                                        }
+                                        
+                                        _ => {
+                                            // Other transaction types (Stake, TokenizeProperty, etc.)
+                                            // For now, treat as simple transfers for the core amount
+                                            let sender_balance = storage_loop.get_balance(&tx.sender);
+                                            if sender_balance >= tx.fee {
+                                                storage_loop.update_balance(&tx.sender, sender_balance - tx.fee);
+                                                storage_loop.increment_nonce(&tx.sender);
+                                                info!("✅ Special Tx: {:?} from {}", tx.tx_type, tx.sender);
+                                            }
+                                        }
                                     }
                                 }
-                            },
-                            aureum_node::core::TransactionType::ReleaseLien { ref property_id, ref lien_id } => {
-                                if let Some(mut prop) = storage_loop.get_property(property_id) {
-                                    // In a real implementation, this would require authority/lender signature
-                                    prop.liens.retain(|l| l != lien_id);
-                                    storage_loop.save_property(&prop);
-                                    storage_loop.increment_nonce(&tx.sender);
-                                    info!("LIEN RELEASED for Property {}", property_id);
-                                }
-                            },
-                            aureum_node::core::TransactionType::TransferFraction { ref property_id, ref to, basis_points } => {
-                                if let Some(mut prop) = storage_loop.get_property(property_id) {
-                                    if prop.owner == tx.sender {
-                                        prop.co_owners.push((to.clone(), basis_points));
-                                        storage_loop.save_property(&prop);
-                                        storage_loop.increment_nonce(&tx.sender);
-                                        info!("FRACTIONAL TRANSFER: {} bps of {} to {}", basis_points, property_id, to);
-                                    }
-                                }
-                            },
-                            // Multi-Sig Creation
-                            aureum_node::core::TransactionType::CreateMultiSig { ref owners, threshold } => {
-                                let ms_address = aureum_node::core::generate_address(tx.sender.as_bytes()); // Deterministic generation hack
-                                let ms_account = aureum_node::core::MultiSigAccount {
-                                    address: ms_address.clone(),
-                                    owners: owners.clone(),
-                                    threshold,
-                                    nonce: 0,
-                                };
-                                storage_loop.save_multisig(&ms_account);
-                                storage_loop.increment_nonce(&tx.sender);
-                                info!("MULTISIG CREATED: {} (Threshold: {}/{})", ms_address, threshold, owners.len());
-                            },
-                            _ => {
-                                // Default increment for other types to prevent stuck mempool
-                                storage_loop.increment_nonce(&tx.sender);
+                                
+                                storage_loop.save_block(&block);
+                                storage_loop.flush();
+                                info!("💾 Block {} finalized with {} txs", block.header.height, block.transactions.len());
+                                engine.next_step(&storage_loop, Some(&block));
+                            } else {
+                                engine.next_step(&storage_loop, None);
                             }
                         }
                     }
-
-                    // 3. Construct and Save Block
-                    let mut block = Block {
-                        header: aureum_node::core::BlockHeader {
-                            parent_hash: storage_loop.get_block(engine.height - 1).map(|b| b.hash()).unwrap_or_default(),
-                            timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
-                            height: engine.height,
-                            state_root: storage_loop.calculate_state_root(), 
-                            tx_merkle_root: "0".to_string(),
-                        },
-                        transactions: current_txs,
-                    };
-                    block.header.tx_merkle_root = block.calculate_merkle_root();
-                    
-                    storage_loop.save_block(&block);
-                    
-                    // 4. Finalize height in engine
-                    engine.next_step(&storage_loop, Some(&block));
                 }
             }
         }
     });
 
+    // RPC Server
     let mut io = IoHandler::default();
-
-    // RPC: aureum_getChainState
-    let storage_rpc = storage.clone();
-    io.add_method("aureum_getChainState", move |_| {
-        let storage = storage_rpc.clone();
+    
+    let s_clone = storage.clone();
+    io.add_method("aureum_getBalance", move |params: Params| {
+        let s = s_clone.clone();
         async move {
-            let state = storage.get_chain_state().unwrap();
+            let addrs: Vec<String> = params.parse().map_err(|_| jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Expected [address]"))?;
+            if addrs.is_empty() {
+                return Err(jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Address missing"));
+            }
+            Ok(Value::String(s.get_balance(&addrs[0]).to_string()))
+        }
+    });
+
+    let s_clone = storage.clone();
+    io.add_method("eth_getBalance", move |params: Params| {
+        let s = s_clone.clone();
+        async move {
+            let addrs: Vec<String> = params.parse().map_err(|_| jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Expected [address]"))?;
+            if addrs.is_empty() {
+                return Err(jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Address missing"));
+            }
+            Ok(Value::String(s.get_balance(&addrs[0]).to_string()))
+        }
+    });
+
+    let s_clone = storage.clone();
+    io.add_method("aureum_getNonce", move |params: Params| {
+        let s = s_clone.clone();
+        async move {
+            let addrs: Vec<String> = params.parse().map_err(|_| jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Expected [address]"))?;
+            if addrs.is_empty() {
+                return Err(jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Address missing"));
+            }
+            Ok(Value::String(s.get_nonce(&addrs[0]).to_string()))
+        }
+    });
+
+    let s_clone = storage.clone();
+    io.add_method("aureum_getChainState", move |params: Params| {
+        let s = s_clone.clone();
+        async move {
+            let state = s.get_chain_state().unwrap_or(ChainState { total_supply: 0, burned_fees: 0 });
             Ok(serde_json::to_value(state).unwrap())
         }
     });
 
-    // RPC: aureum_registerComplianceProfile (Priority 4)
-    let comp_clone = compliance_engine.clone();
-    io.add_method("aureum_registerComplianceProfile", move |params: Params| {
-        let comp = comp_clone.clone();
+    let s_clone = storage.clone();
+    io.add_method("aureum_getLatestBlock", move |_| {
+        let s = s_clone.clone();
         async move {
-            let profile: ComplianceProfile = params.parse().expect("Invalid profile data");
-            comp.lock().await.register_profile(profile);
-            Ok(Value::Bool(true))
+            let height = s.get_latest_height();
+            let block = s.get_block(height);
+            Ok(serde_json::to_value(block).unwrap_or(Value::Null))
         }
     });
 
-    // RPC: aureum_submitOracleReport (Priority 5)
-    let oracle_clone = oracle.clone();
-    io.add_method("aureum_submitOracleReport", move |params: Params| {
-        let oracle = oracle_clone.clone();
+    let s_clone = storage.clone();
+    io.add_method("aureum_getBlockByNumber", move |params: Params| {
+        let s = s_clone.clone();
         async move {
-            let report: OracleReport = params.parse().expect("Invalid oracle report");
-            oracle.lock().await.submit_report(report);
-            Ok(Value::Bool(true))
+            let height: Vec<u64> = params.parse().map_err(|_| jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Expected [height]"))?;
+            if height.is_empty() {
+                return Err(jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Height missing"));
+            }
+            let block = s.get_block(height[0]);
+            Ok(serde_json::to_value(block).unwrap_or(Value::Null))
         }
     });
 
-    // RPC: aureum_getOraclePrice (Priority 5)
-    let oracle_clone_2 = oracle.clone();
-    io.add_method("aureum_getOraclePrice", move |params: Params| {
-        let oracle = oracle_clone_2.clone();
-        async move {
-            let asset_id: String = params.parse().expect("Invalid asset ID");
-            let price = oracle.lock().await.get_price(&asset_id);
-            Ok(match price {
-                Some(p) => Value::Number(p.into()),
-                None => Value::Null,
-            })
-        }
-    });
-
-    // RPC: aureum_call (AVM Execution)
     let vm_clone = vm.clone();
-    io.add_method("aureum_call", move |params: Params| {
-        let vm = vm_clone.clone();
+    io.add_method("aureum_estimateGas", move |params: Params| {
+        let _vm = vm_clone.clone();
         async move {
-            let (caller, target, data): (String, String, String) = params.parse()
-                .expect("Expected (caller, target, data_hex)");
-            let data_bytes = hex::decode(data.replace("0x", "")).unwrap_or_default();
+            // Simplified gas estimation based on data length
+            let tx_hex: String = params.parse().unwrap();
+            let bytes = hex::decode(tx_hex.replace("0x", "")).unwrap_or_default();
+            let gas = 21000 + (bytes.len() as u64 * 16);
+            Ok(Value::String(gas.to_string()))
+        }
+    });
+
+    let m_clone = mempool.clone();
+    let v_clone = vm.clone();
+    io.add_method("aureum_submitTransaction", move |params: Params| {
+        let m = m_clone.clone();
+        let v = v_clone.clone();
+        async move {
+            let txs: Vec<Transaction> = params.parse().map_err(|_| jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Invalid Transaction JSON array"))?;
+            if txs.is_empty() {
+                 return Err(jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Transaction missing"));
+            }
+            let tx = &txs[0];
             
-            match vm.execute_call(&caller, &target, data_bytes, 0) {
-                Ok(result) => Ok(Value::String(format!("{:?}", result))),
-                Err(e) => Ok(Value::String(format!("Error: {}", e))),
+            if !tx.verify_signature() {
+                return Ok(Value::String("Invalid Signature".into()));
             }
-        }
-    });
 
-    // RPC: aureum_estimateGas
-    io.add_method("aureum_estimateGas", move |_| async {
-        Ok(Value::String("21000".to_string())) // Mock
-    });
-
-    // RPC: aureum_getNetworkStatus
-    let engine_clone = engine.clone();
-    let peer_count_rpc = peer_count.clone();
-    io.add_method("aureum_getNetworkStatus", move |_| {
-        let engine = engine_clone.clone();
-        let p_count = peer_count_rpc.clone();
-        async move {
-            let e = engine.lock().await;
-            let peers = p_count.lock().await;
-            Ok(Value::String(format!("Height: {}, Step: {:?}, Validators: {}, Peers: {}", 
-                e.height, e.step, e.validator_set.validators.len(), *peers)))
-        }
-    });
-
-    // RPC: aureum_getPeers
-    let peer_count_rpc_2 = peer_count.clone();
-    io.add_method("aureum_getPeers", move |_| {
-        let p_count = peer_count_rpc_2.clone();
-        async move {
-            let count = p_count.lock().await;
-            Ok(Value::Number((*count as u64).into()))
-        }
-    });
-
-    // RPC: aureum_getValidators
-    let storage_clone = storage.clone();
-    io.add_method("aureum_getValidators", move |_| {
-        let storage = storage_clone.clone();
-        async move {
-            let set = storage.get_validator_set().unwrap();
-            Ok(serde_json::to_value(set.validators).unwrap())
-        }
-    });
-
-    // RPC: aureum_getNonce
-    let storage_nonce = storage.clone();
-    io.add_method("aureum_getNonce", move |params: Params| {
-        let storage = storage_nonce.clone();
-        async move {
-            let address: String = params.parse().expect("Invalid address parameter");
-            let nonce = storage.get_nonce(&address);
-            Ok(Value::Number(nonce.into()))
-        }
-    });
-
-    // RPC: aureum_getBalance
-    let storage_clone = storage.clone();
-    io.add_method("aureum_getBalance", move |params: Params| {
-        let storage = storage_clone.clone();
-        async move {
-            let address: String = params.parse().expect("Invalid address parameter");
-            let balance = storage.get_balance(&address);
-            Ok(Value::String(format!("{}", balance)))
-        }
-    });
-
-    // RPC: aureum_getProperty (Part 4.2.B)
-    let storage_prop = storage.clone();
-    io.add_method("aureum_getProperty", move |params: Params| {
-        let storage = storage_prop.clone();
-        async move {
-            let id: String = params.parse().expect("Invalid property ID");
-            match storage.get_property(&id) {
-                Some(p) => Ok(serde_json::to_value(p).unwrap()),
-                None => Ok(Value::Null),
+            if !v.verify_compliance(&tx) {
+                return Ok(Value::String("Compliance Check Failed".into()));
             }
+
+            let hash = tx.hash();
+            let mut tx_with_hash = tx.clone();
+            tx_with_hash.hash = Some(hash.clone());
+            m.lock().await.push(tx_with_hash);
+            Ok(Value::String(hash))
         }
     });
 
-    // RPC: aureum_getVisaStatus (Section 1.3.B)
-    let storage_visa = storage.clone();
-    io.add_method("aureum_getVisaStatus", move |params: Params| {
-        let storage = storage_visa.clone();
-        async move {
-            let applicant: String = params.parse().expect("Invalid applicant address");
-            match storage.get_visa_application(&applicant) {
-                Some(v) => Ok(serde_json::to_value(v).unwrap()),
-                None => Ok(Value::Null),
-            }
-        }
-    });
-
-    // RPC: aureum_sendTransaction
-    let tx_broadcaster = tx_sender.clone();
-    let vm_compliance = vm.clone();
-    let mempool_rpc = mempool.clone();
+    let m_clone = mempool.clone();
+    let vm_clone = vm.clone();
     io.add_method("aureum_sendTransaction", move |params: Params| {
-        let broadcaster = tx_broadcaster.clone();
-        let vm = vm_compliance.clone();
-        let mempool = mempool_rpc.clone();
+        let m = m_clone.clone();
+        let v = vm_clone.clone();
         async move {
-            let tx_hex: String = params.parse().expect("Invalid transaction hex");
-            let tx_bytes = hex::decode(tx_hex.replace("0x", "")).expect("Invalid hex");
+            let tx_hex: String = params.parse().unwrap();
+            let bytes = hex::decode(tx_hex.replace("0x", "")).map_err(|_| jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Invalid hex"))?;
+            let tx = Transaction::decode(&mut &bytes[..]).map_err(|_| jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Decode Failed"))?;
             
-            // Priority 4 Hook: Compliance Enforcement
-            if !vm.verify_compliance(&tx_bytes) {
-                warn!("Compliance check failed for transaction broadcast");
-                return Err(jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Compliance Verification Failed"));
+            if !tx.verify_signature() {
+                return Ok(Value::String("Invalid Signature".into()));
             }
 
-            // Decode and Securely Verify Transaction
-            if let Ok(tx) = aureum_node::core::Transaction::decode(&mut &tx_bytes[..]) {
-                // Cryptographic Signature Check (Security Roadmap 1.2.F)
-                if !tx.verify_signature() {
-                    warn!("Invalid cryptographic signature for transaction from {}", tx.sender);
-                    return Err(jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Invalid Cryptographic Signature"));
-                }
-
-                let mut pool = mempool.lock().await;
-                pool.push(tx);
-                info!("Transaction verified and entered mempool. Total: {}", pool.len());
-            } else {
-                return Err(jsonrpc_http_server::jsonrpc_core::Error::invalid_params("Transaction Decoding Failed"));
+            if !v.verify_compliance(&tx) {
+                return Ok(Value::String("Compliance Check Failed".into()));
             }
 
-            if let Err(e) = broadcaster.send(tx_bytes).await {
-                error!("Failed to queue transaction for broadcast: {:?}", e);
-                return Err(jsonrpc_http_server::jsonrpc_core::Error::internal_error());
-            }
+            let hash = tx.hash();
+            m.lock().await.push(tx);
+            Ok(Value::String(format!("0x{}", hash)))
+        }
+    });
 
-            Ok(Value::String("0x...hash...".to_string()))
+    let s_clone = storage.clone();
+    io.add_method("aureum_getProperty", move |params: Params| {
+        let s = s_clone.clone();
+        async move {
+            let id: String = params.parse().unwrap();
+            let prop = s.get_property(&id);
+            Ok(serde_json::to_value(prop).unwrap())
+        }
+    });
+
+    let s_clone = storage.clone();
+    io.add_method("aureum_getVisaStatus", move |params: Params| {
+        let s = s_clone.clone();
+        async move {
+            let addr: String = params.parse().unwrap();
+            let app = s.get_visa_application(&addr);
+            Ok(serde_json::to_value(app).unwrap())
         }
     });
 
     let server = ServerBuilder::new(io)
-        .start_http(&"0.0.0.0:8545".parse().unwrap())
-        .expect("Unable to start RPC server");
-    
-    info!("🚀 RPC Server started on http://0.0.0.0:8545");
+        .start_http(&format!("0.0.0.0:{}", rpc_port).parse().unwrap())
+        .expect("RPC start failed");
 
-    info!("Aureum JSON-RPC Server available at http://127.0.0.1:3030");
-    
+    info!("🌐 RPC Server active on port {}", rpc_port);
     server.wait();
 }

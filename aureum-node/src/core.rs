@@ -4,13 +4,16 @@ use parity_scale_codec::{Encode, Decode};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
 pub struct Transaction {
-    pub sender: String,   // Format: aur1...
-    pub receiver: String, // Format: aur1...
+    pub sender: String,
+    pub receiver: String,
     pub amount: u64,
     pub nonce: u64,
-    pub fee: u64,         // Institutional network fee
+    pub fee: u64,
     pub signature: Vec<u8>,
+    pub pub_key: Vec<u8>,
     pub tx_type: TransactionType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>, // Computed hash for display/querying
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
@@ -18,30 +21,14 @@ pub enum TransactionType {
     Transfer,
     Stake { amount: u64 },
     Unstake { amount: u64 },
-    Delegate { validator: String, amount: u64 },
-    Mint { amount: u64 }, // Institutional minting
-    Burn { amount: u64 }, // Intentional burning
     TokenizeProperty { address: String, metadata: String },
-    IdentityUpdate { did: String },
     ApplyForVisa { property_id: String, program: VisaProgram },
-    ContractCreate { bytecode: Vec<u8> },              // Deploy Solidity/Quorlin contract
-    ContractCall { target: String, data: Vec<u8> },    // Interact with institutional logic
-    
-    // Advanced Property Ops (Section 1.3.A)
-    AddMortgage { property_id: String, details: String },
-    ReleaseLien { property_id: String, lien_id: String },
+    ContractCreate { bytecode: Vec<u8> },
+    ContractCall { target: String, data: Vec<u8> },
+    RegisterCompliance { profile: crate::compliance::ComplianceProfile },
+    SubmitOracleReport { report: crate::oracle::OracleReport },
     TransferFraction { property_id: String, to: String, basis_points: u64 },
-    
-    // Multi-Sig / Governance (Section 1.2.D)
     CreateMultiSig { owners: Vec<String>, threshold: u8 },
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
-pub struct MultiSigAccount {
-    pub address: String,
-    pub owners: Vec<String>,
-    pub threshold: u8,
-    pub nonce: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode, PartialEq)]
@@ -71,15 +58,28 @@ pub struct VisaApplication {
 }
 
 impl Transaction {
+    pub fn hash(&self) -> String {
+        let mut hasher = Keccak256::new();
+        hasher.update(self.sender.as_bytes());
+        hasher.update(self.receiver.as_bytes());
+        hasher.update(self.amount.to_be_bytes());
+        hasher.update(self.nonce.to_be_bytes());
+        hasher.update(self.fee.to_be_bytes());
+        hasher.update(&self.pub_key);
+        hasher.update(self.tx_type.encode());
+        hex::encode(hasher.finalize())
+    }
+
     pub fn verify_signature(&self) -> bool {
         use ed25519_dalek::{VerifyingKey, Signature, Verifier};
         
-        // Remove aur1 prefix and treat as hex for public key
-        let pub_key_res = hex::decode(self.sender.replace("aur1", ""));
-        let Ok(public_key_bytes) = pub_key_res else { return false; };
-        if public_key_bytes.len() != 32 { return false; }
-        
-        let Ok(public_key) = VerifyingKey::from_bytes(&public_key_bytes.try_into().unwrap_or([0u8; 32])) else {
+        let expected_addr = generate_address(&self.pub_key);
+        if expected_addr != self.sender {
+            return false;
+        }
+
+        if self.pub_key.len() != 32 { return false; }
+        let Ok(public_key) = VerifyingKey::from_bytes(&self.pub_key.clone().try_into().unwrap_or([0u8; 32])) else {
             return false;
         };
 
@@ -89,6 +89,7 @@ impl Transaction {
         msg.extend_from_slice(&self.amount.to_be_bytes());
         msg.extend_from_slice(&self.nonce.to_be_bytes());
         msg.extend_from_slice(&self.fee.to_be_bytes());
+        msg.extend_from_slice(&self.pub_key);
         msg.extend_from_slice(&self.tx_type.encode());
 
         let Ok(sig) = Signature::from_slice(&self.signature) else {
@@ -108,7 +109,7 @@ pub struct ChainState {
 #[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode, PartialEq)]
 pub enum ValidatorRole {
     Standard,
-    Authority, // Special subset with veto rights
+    Authority,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
@@ -155,9 +156,9 @@ impl Block {
         Block {
             header: BlockHeader {
                 parent_hash: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
-                timestamp: 1768234250, // Launch epoch
+                timestamp: 1672531200,
                 height: 0,
-                state_root: "genesis_state".to_string(),
+                state_root: "genesis".to_string(),
                 tx_merkle_root: "0".to_string(),
             },
             transactions: vec![],
@@ -169,8 +170,8 @@ impl Block {
         hasher.update(self.header.parent_hash.as_bytes());
         hasher.update(self.header.height.to_be_bytes());
         hasher.update(self.header.timestamp.to_be_bytes());
-        let hash_bytes = hasher.finalize();
-        hex::encode(hash_bytes)
+        hasher.update(self.header.state_root.as_bytes());
+        hex::encode(hasher.finalize())
     }
 
     pub fn calculate_merkle_root(&self) -> String {
@@ -205,40 +206,34 @@ pub fn generate_address(public_key: &[u8]) -> String {
     let mut hasher = Keccak256::new();
     hasher.update(public_key);
     let result = hasher.finalize();
-    format!("aur1{}", hex::encode(&result[..20]))
+    format!("A{}", hex::encode(&result[..20]))
 }
-
-// --- Institutional Property Asset Model (Part 1.3) ---
 
 #[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
 pub struct Property {
-    pub id: String,                 // PropertyId (UUID or sequential)
-    pub owner: String,              // Primary Owner Address
-    pub co_owners: Vec<(String, u64)>, // Fractional ownership (Address, StakeBasisPoints)
-    
-    // Legal & location
-    pub jurisdiction: String,       // e.g., "Portugal", "UAE"
+    pub id: String,
+    pub owner: String,
+    pub co_owners: Vec<(String, u64)>,
+    pub jurisdiction: String,
     pub legal_description: String,
-    pub coordinates: (f64, f64),    // (Latitude, Longitude)
-    
-    // Valuation
+    pub coordinates: (f64, f64),
     pub valuation_eur: u64,
     pub valuation_timestamp: u64,
     pub valuation_oracle: String,
-    
-    // Documentation (Hashes)
     pub title_deed_hash: String,
     pub survey_hash: String,
-    
-    // Visa program
     pub visa_program_eligible: bool,
     pub minimum_investment_met: bool,
-    
-    // Compliance
-    pub kyc_status: u8,             // 0: None, 1: Verified
+    pub kyc_status: u8,
     pub aml_cleared: bool,
-    
-    // Encumbrances
-    pub mortgages: Vec<String>,     // Document hashes of mortgages
+    pub mortgages: Vec<String>,
     pub liens: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
+pub struct MultiSigAccount {
+    pub address: String,
+    pub owners: Vec<String>,
+    pub threshold: u8,
+    pub nonce: u64,
 }

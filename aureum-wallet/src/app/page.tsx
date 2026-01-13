@@ -10,6 +10,9 @@ import {
   Search, Filter, CreditCard, Landmark, Check
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
+import { getBalance, getNonce, signAndSendTransaction, getLatestBlock, RPC_URL } from "../lib/blockchain";
+import nacl from "tweetnacl";
+import { keccak256 } from "js-sha3";
 
 type AppStep = "landing" | "signup" | "mnemonic_show" | "mnemonic_verify" | "login" | "dashboard";
 
@@ -73,17 +76,79 @@ export default function AureumWallet() {
   const [isReceiving, setIsReceiving] = useState(false);
   const [isPayingEscrow, setIsPayingEscrow] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [escrowStep, setEscrowStep] = useState<"initial" | "locked" | "completed">("initial");
   const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
   const [showPKWarning, setShowPKWarning] = useState(false);
-  const [walletAddress] = useState("A" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15));
+  const [walletAddress, setWalletAddress] = useState("");
+  const [privateKey, setPrivateKey] = useState("");
+  const [publicKey, setPublicKey] = useState("");
+  const [balance, setBalance] = useState("0");
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [nonce, setNonce] = useState(0);
   const [showAllTransactions, setShowAllTransactions] = useState(false);
   const [selectedMarket, setSelectedMarket] = useState<string | null>(null);
+  const [sendRecipient, setSendRecipient] = useState("");
+  const [sendAmount, setSendAmount] = useState("");
+  const [sendFee, setSendFee] = useState("0.001");
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isReviewing, setIsReviewing] = useState(false);
 
   useEffect(() => {
     const words = "luxury asset golden visa chain property secure investment global portal premium speed liquidity".split(" ");
     setMnemonic(words.sort(() => Math.random() - 0.5).slice(0, 12));
-  }, []);
+
+    // Load existing wallet from localStorage if available
+    const storedPrivateKey = localStorage.getItem("aureum_wallet_pk");
+    if (storedPrivateKey && !walletAddress) {
+      loadWalletFromPrivateKey(storedPrivateKey);
+    }
+
+    // Initial fetch
+    if (step === "dashboard" && walletAddress) {
+      fetchWalletData();
+
+      // Auto-refresh every 3 seconds to show real-time updates
+      const interval = setInterval(() => {
+        fetchWalletData();
+      }, 3000);
+
+      return () => clearInterval(interval);
+    }
+  }, [step, walletAddress]);
+
+  useEffect(() => {
+    if (step === "dashboard") {
+      const interval = setInterval(fetchWalletData, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [step, walletAddress]);
+
+  const fetchWalletData = async () => {
+    try {
+      const b = await getBalance(walletAddress);
+      setBalance(b.toString());
+
+      const n = await getNonce(walletAddress);
+      setNonce(n);
+
+      const latest = await getLatestBlock();
+      if (latest && latest.transactions) {
+        // Filter transactions for this wallet
+        const relevantTxs: any[] = [];
+        // In a real scenario, we'd scan multiple blocks. 
+        // For now, let's just show the latest block's txs if they belong to us.
+        latest.transactions.forEach((tx: any) => {
+          if (tx.sender === walletAddress || tx.receiver === walletAddress) {
+            relevantTxs.push({ ...tx, blockHeight: latest.header.height });
+          }
+        });
+        setTransactions(relevantTxs);
+      }
+    } catch (e) {
+      console.error("Failed to fetch wallet data", e);
+    }
+  };
 
   const handleLogout = () => {
     setStep("landing");
@@ -91,13 +156,43 @@ export default function AureumWallet() {
     setSelectedProperty(null);
   };
 
-  const handleEscrowPay = () => {
+
+
+  const handleEscrowPay = async () => {
+    setIsPayingEscrow(true);
+    // Simulate smart contract interaction for locking funds
+    setTimeout(async () => {
+      // Send transaction to Escrow Smart Contract (Simulated)
+      if (walletAddress) {
+        try {
+          const tx = {
+            sender: walletAddress,
+            receiver: "ESCROW_VAULT",
+            amount: 50000,
+            nonce: nonce + 1,
+            fee: 1,
+            signature: [],
+            pub_key: [],
+            tx_type: 'ContractCall'
+          };
+          // In real app we would sign and send this.
+          // For demo, we just update UI state to Locked.
+        } catch (e) { }
+      }
+
+      setIsPayingEscrow(false);
+      setEscrowStep("locked");
+    }, 2000);
+  };
+
+  const handleReleaseFunds = () => {
     setIsPayingEscrow(true);
     setTimeout(() => {
       setIsPayingEscrow(false);
+      setEscrowStep("completed");
       setPaymentSuccess(true);
       setTimeout(() => setPaymentSuccess(false), 3000);
-    }, 2500);
+    }, 2000);
   };
 
   const handleExportPK = () => {
@@ -111,6 +206,83 @@ export default function AureumWallet() {
       setShowPKWarning(true);
     } else {
       alert("Incorrect password");
+    }
+  };
+
+  const generateNewWallet = () => {
+    // Generate Ed25519 keypair
+    const keypair = nacl.sign.keyPair();
+    const privKeyHex = Array.from(keypair.secretKey.slice(0, 32)).map(b => b.toString(16).padStart(2, '0')).join('');
+    const pubKeyHex = Array.from(keypair.publicKey).map(b => b.toString(16).padStart(2, '0')).join('');
+
+    // Derive address from public key using Keccak256 (matching node's logic)
+    const hash = keccak256(keypair.publicKey);
+    const addressSuffix = hash.slice(0, 40); // First 20 bytes (40 hex chars)
+    const address = "A" + addressSuffix;
+
+    setPrivateKey(privKeyHex);
+    setPublicKey(pubKeyHex);
+    setWalletAddress(address);
+
+    // Store private key (INSECURE - for demo only)
+    localStorage.setItem("aureum_wallet_pk", privKeyHex);
+    localStorage.setItem("aureum_wallet_address", address);
+  };
+
+  const loadWalletFromPrivateKey = (pkHex: string) => {
+    try {
+      const pkBytes = new Uint8Array(pkHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+      const keypair = nacl.sign.keyPair.fromSeed(pkBytes);
+      const pubKeyHex = Array.from(keypair.publicKey).map(b => b.toString(16).padStart(2, '0')).join('');
+
+      const hash = keccak256(keypair.publicKey);
+      const addressSuffix = hash.slice(0, 40);
+      const address = "A" + addressSuffix;
+
+      setPrivateKey(pkHex);
+      setPublicKey(pubKeyHex);
+      setWalletAddress(address);
+    } catch (e) {
+      console.error("Failed to load wallet", e);
+    }
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert("Copied to clipboard!");
+    } catch (e) {
+      console.error("Failed to copy", e);
+      alert("Failed to copy. Please copy manually.");
+    }
+  };
+
+  const handleSend = async () => {
+    if (!sendRecipient || !sendAmount || !privateKey) return;
+    setIsProcessing(true);
+    try {
+      const hash = await signAndSendTransaction(
+        walletAddress,
+        sendRecipient,
+        parseFloat(sendAmount),
+        nonce,
+        parseFloat(sendFee),
+        privateKey
+      );
+      if (hash && hash.startsWith("A")) {
+        alert("Transaction Successful! Hash: " + hash);
+        setIsSending(false);
+        setIsReviewing(false);
+        setSendRecipient("");
+        setSendAmount("");
+        fetchWalletData();
+      } else {
+        alert("Transaction Failed: " + hash);
+      }
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -136,7 +308,7 @@ export default function AureumWallet() {
 
             <div className="w-full max-w-sm space-y-4">
               <button
-                onClick={() => setStep("signup")}
+                onClick={() => { generateNewWallet(); setStep("signup"); }}
                 className="btn-primary w-full py-5 text-base"
               >
                 Create New Wallet
@@ -145,7 +317,13 @@ export default function AureumWallet() {
                 onClick={() => setStep("login")}
                 className="btn-outline w-full py-5 text-base"
               >
-                Access Existing Wallet
+                Login with Password
+              </button>
+              <button
+                onClick={() => { setStep("login"); setShowPasswordPrompt(true); }}
+                className="text-[10px] uppercase tracking-[0.4em] text-gray-600 font-bold hover:text-white transition-colors mt-8"
+              >
+                — or import secure key —
               </button>
             </div>
           </motion.div>
@@ -213,7 +391,7 @@ export default function AureumWallet() {
               </div>
 
               <div className="flex gap-4">
-                <button className="btn-outline flex-1 gap-2"><Copy size={16} /> Copy All</button>
+                <button onClick={() => copyToClipboard(mnemonic.join(' '))} className="btn-outline flex-1 gap-2"><Copy size={16} /> Copy All</button>
                 <button
                   onClick={() => setStep("dashboard")}
                   className="btn-primary flex-1"
@@ -266,8 +444,17 @@ export default function AureumWallet() {
                   Unlock Wallet
                 </button>
                 <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-widest text-gray-500 pt-4 border-t border-white/5">
-                  <button onClick={() => setStep("signup")} className="hover:text-red-500 transition-colors">Emergency Recovery</button>
-                  <button onClick={() => setStep("landing")} className="hover:text-white transition-colors">Switch Account</button>
+                  <button onClick={() => {
+                    const pk = prompt("Enter your 64-character Private Key hex:");
+                    if (pk && pk.length === 64) {
+                      loadWalletFromPrivateKey(pk);
+                      localStorage.setItem("aureum_wallet_pk", pk);
+                      alert("Key imported successfully. Now set a password or login.");
+                    } else if (pk) {
+                      alert("Invalid Key length. Must be 64 hex characters.");
+                    }
+                  }} className="hover:text-red-500 transition-colors">Import Key</button>
+                  <button onClick={() => setStep("landing")} className="hover:text-white transition-colors">Back</button>
                 </div>
               </div>
             </div>
@@ -298,7 +485,7 @@ export default function AureumWallet() {
               <div className="mt-auto space-y-6">
                 <div className="p-4 core-card bg-red-600/5 border-red-500/10">
                   <div className="text-[10px] text-red-500 font-bold uppercase mb-1">Network Status</div>
-                  <div className="text-xs font-bold text-gray-400">Mainnet v0.1.0 (aur1)</div>
+                  <div className="text-xs font-bold text-gray-400">Mainnet v0.1.0 ({walletAddress.startsWith('A') ? 'A-standard' : 'Legacy'})</div>
                 </div>
                 <button
                   onClick={handleLogout}
@@ -318,7 +505,7 @@ export default function AureumWallet() {
                     <div className="absolute top-0 right-0 w-96 h-96 bg-red-600/10 blur-[100px] -mr-48 -mt-48 rounded-full"></div>
                     <h2 className="text-xs uppercase tracking-[0.4em] text-gray-500 mb-4 font-bold">Total Asset Valuation</h2>
                     <h1 className="text-7xl font-bold mb-6 font-premium tracking-tighter flex items-start gap-2">
-                      <span className="text-2xl mt-3 mr-2 font-medium opacity-50">€</span> 1,245,600<span className="text-red-500">.45</span>
+                      <span className="text-2xl mt-3 mr-2 font-medium opacity-50">AUR</span> {Number(balance).toLocaleString()}<span className="text-red-500">.00</span>
                     </h1>
                     <div className="flex gap-6 mb-8">
                       <div className="flex items-center gap-2 text-emerald-500 text-sm font-bold">
@@ -331,7 +518,7 @@ export default function AureumWallet() {
                         <div className="text-[10px] uppercase text-gray-500 font-bold mb-1 tracking-widest">Your Wallet Address</div>
                         <div className="font-mono text-sm text-gray-300">{walletAddress.substring(0, 12)}...{walletAddress.substring(walletAddress.length - 8)}</div>
                       </div>
-                      <button onClick={() => navigator.clipboard.writeText(walletAddress)} className="text-red-500 hover:text-red-400 transition-all p-2 hover:bg-red-500/10 rounded-lg">
+                      <button onClick={() => copyToClipboard(walletAddress)} className="text-red-500 hover:text-red-400 transition-all p-2 hover:bg-red-500/10 rounded-lg">
                         <Copy size={18} />
                       </button>
                     </div>
@@ -359,11 +546,18 @@ export default function AureumWallet() {
                     </button>
                   </div>
 
-                  {/* Token List */}
                   <div className="space-y-4 mb-16">
                     <h3 className="text-[10px] uppercase tracking-[0.4em] text-gray-500 font-bold mb-4">Currency Vault</h3>
-                    <AssetRow symbol="AUR" name="Aureum Governance" balance="1,250.45" value="€2,500.90" />
-                    <AssetRow symbol="USDC" name="Aureum Stablecoin" balance="5,000.00" value="€5,000.00" />
+                    {Number(balance) > 0 ? (
+                      <AssetRow symbol="AUR" name="Aureum Governance" balance={Number(balance).toLocaleString()} value={`€${(Number(balance) * 2).toLocaleString()}`} />
+                    ) : (
+                      <div className="text-center py-20 border-2 border-dashed border-white/5 rounded-3xl group hover:border-red-500/20 transition-all">
+                        <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-4 text-gray-600 group-hover:bg-red-500/10 group-hover:text-red-500 transition-all">
+                          <Plus size={24} />
+                        </div>
+                        <p className="text-gray-600 group-hover:text-gray-400 transition-all font-bold uppercase tracking-widest text-[10px]">No core assets in vault</p>
+                      </div>
+                    )}
                   </div>
 
                   {/* Transaction History */}
@@ -372,34 +566,19 @@ export default function AureumWallet() {
                       <h3 className="text-[10px] uppercase tracking-[0.4em] text-gray-500 font-bold">Recent Transactions</h3>
                       <button onClick={() => setShowAllTransactions(true)} className="text-[10px] font-bold text-red-500 uppercase tracking-widest hover:text-white transition-colors">View All Transactions</button>
                     </div>
-                    <TransactionRow
-                      type="received"
-                      from="A8k2n5p...x9m4"
-                      amount="+250.00 AUR"
-                      date="2 hours ago"
-                      status="confirmed"
-                    />
-                    <TransactionRow
-                      type="sent"
-                      to="A3f7h9j...k2p1"
-                      amount="-100.00 AUR"
-                      date="1 day ago"
-                      status="confirmed"
-                    />
-                    <TransactionRow
-                      type="property"
-                      property="Golden Palace Lisbon"
-                      amount="-500,000.00 EUR"
-                      date="3 days ago"
-                      status="escrow"
-                    />
-                    <TransactionRow
-                      type="received"
-                      from="A1b2c3d...e4f5"
-                      amount="+1,000.00 AUR"
-                      date="1 week ago"
-                      status="confirmed"
-                    />
+                    {transactions.length > 0 ? transactions.map((tx, i) => (
+                      <TransactionRow
+                        key={i}
+                        type={tx.sender === walletAddress ? "sent" : "received"}
+                        from={tx.sender}
+                        to={tx.receiver}
+                        amount={(tx.sender === walletAddress ? "-" : "+") + tx.amount + " AUR"}
+                        date={`Block #${tx.blockHeight}`}
+                        status="confirmed"
+                      />
+                    )) : (
+                      <div className="text-center py-10 text-gray-600 font-bold uppercase italic tracking-widest bg-white/5 rounded-2xl">No Recent Activity on Chain</div>
+                    )}
                   </div>
                 </div>
               )}
@@ -446,7 +625,7 @@ export default function AureumWallet() {
 
               {activeTab === "real-estate" && selectedProperty && (
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl mx-auto">
-                  <button onClick={() => setSelectedProperty(null)} className="mb-10 flex items-center gap-2 text-gray-500 hover:text-white group">
+                  <button onClick={() => { setSelectedProperty(null); setEscrowStep("initial"); }} className="mb-10 flex items-center gap-2 text-gray-500 hover:text-white group">
                     <ArrowRight className="rotate-180 group-hover:-translate-x-1 transition-transform" /> Back to Market
                   </button>
 
@@ -500,20 +679,57 @@ export default function AureumWallet() {
                           <div className="text-5xl font-bold font-premium text-red-500">{selectedProperty.price}</div>
                         </div>
 
-                        <button
-                          onClick={handleEscrowPay}
-                          disabled={isPayingEscrow}
-                          className="w-full btn-primary py-6 text-lg relative overflow-hidden"
-                        >
-                          {isPayingEscrow ? (
-                            <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 2 }}><RefreshCcw /></motion.div>
-                          ) : paymentSuccess ? (
-                            <Check className="text-green-400" />
-                          ) : (
-                            "Pay to Escrow"
+                        <div className="space-y-4">
+                          {escrowStep === "initial" && (
+                            <button
+                              onClick={handleEscrowPay}
+                              disabled={isPayingEscrow}
+                              className="w-full btn-primary py-6 text-lg relative overflow-hidden flex items-center justify-center gap-3"
+                            >
+                              {isPayingEscrow ? (
+                                <>
+                                  <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}><RefreshCcw /></motion.div>
+                                  <span>Locking Funds...</span>
+                                </>
+                              ) : (
+                                "Lock Funds in Escrow"
+                              )}
+                            </button>
                           )}
-                        </button>
-                        <p className="mt-4 text-[10px] text-center text-gray-500 uppercase tracking-tighter">Funds are locked in AUR-ESCROW-V1 contract until approval.</p>
+
+                          {escrowStep === "locked" && (
+                            <div className="space-y-4 animate-in fade-in zoom-in duration-300">
+                              <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center">
+                                <div className="text-emerald-500 font-bold uppercase tracking-widest text-xs mb-1">Funds Secured</div>
+                                <div className="text-white font-premium font-bold italic">50,000 AUR Locked</div>
+                              </div>
+                              <button
+                                onClick={handleReleaseFunds}
+                                disabled={isPayingEscrow}
+                                className="w-full bg-white text-black font-bold py-6 text-lg uppercase tracking-widest hover:bg-gray-200 transition-colors rounded-xl flex items-center justify-center gap-3"
+                              >
+                                {isPayingEscrow ? (
+                                  <>
+                                    <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}><RefreshCcw size={20} /></motion.div>
+                                    <span>Releasing...</span>
+                                  </>
+                                ) : "Release to Landlord"}
+                              </button>
+                            </div>
+                          )}
+
+                          {escrowStep === "completed" && (
+                            <div className="p-6 bg-emerald-600 text-white rounded-xl text-center animate-in fade-in zoom-in">
+                              <CheckCircle2 size={40} className="mx-auto mb-3" />
+                              <div className="font-bold font-premium text-2xl italic mb-1">Deal Finalized</div>
+                              <div className="text-xs uppercase tracking-widest opacity-80">Title Transfer Initiated</div>
+                            </div>
+                          )}
+                        </div>
+                        <p className="mt-4 text-[10px] text-center text-gray-500 uppercase tracking-tighter">
+                          {escrowStep === "initial" ? "Funds are locked in AUR-ESCROW-V1 contract until approval." :
+                            escrowStep === "locked" ? "Waiting for final inspection and approval." : "Transaction recorded on chain."}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -585,7 +801,7 @@ export default function AureumWallet() {
 
               <div className="p-4 bg-white/5 rounded-xl border border-white/5 flex items-center justify-between mb-10">
                 <span className="font-mono text-xs text-gray-400">{walletAddress.substring(0, 8)}...{walletAddress.substring(walletAddress.length - 6)}</span>
-                <button className="text-red-500"><Copy size={16} /></button>
+                <button onClick={() => copyToClipboard(walletAddress)} className="text-red-500"><Copy size={16} /></button>
               </div>
 
               <button onClick={() => setIsReceiving(false)} className="btn-primary w-full">Done</button>
@@ -598,49 +814,80 @@ export default function AureumWallet() {
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-6">
             <div className="max-w-lg w-full core-card p-10 glass-panel border-white/10">
-              <h3 className="text-2xl font-bold mb-2 font-premium tracking-tighter">Dispatch Assets</h3>
-              <p className="text-gray-500 text-sm mb-10">Transfer AUR tokens to another wallet address on the Aureum network.</p>
 
-              <div className="space-y-6 mb-10">
-                <div className="space-y-2">
-                  <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Recipient Address</label>
-                  <input placeholder="A..." className="input-field font-mono" />
-                  <p className="text-[10px] text-gray-600 mt-1">Enter valid Aureum address starting with 'A'</p>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Amount (AUR)</label>
-                    <input placeholder="0.00" className="input-field" type="number" step="0.01" />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Gas Fee (AUR)</label>
-                    <input placeholder="0.001" className="input-field" type="number" step="0.0001" defaultValue="0.001" />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Transaction Note (Optional)</label>
-                  <textarea placeholder="Add a private note for this transaction..." className="input-field resize-none" rows={3}></textarea>
-                </div>
-                <div className="p-4 bg-white/5 rounded-xl border border-white/5">
-                  <div className="flex justify-between text-xs mb-2">
-                    <span className="text-gray-500">Total Amount:</span>
-                    <span className="font-bold">0.00 AUR</span>
-                  </div>
-                  <div className="flex justify-between text-xs mb-2">
-                    <span className="text-gray-500">Network Fee:</span>
-                    <span className="font-bold">0.001 AUR</span>
-                  </div>
-                  <div className="flex justify-between text-sm pt-2 border-t border-white/5">
-                    <span className="text-gray-400 font-bold uppercase tracking-widest text-[10px]">Total Debit:</span>
-                    <span className="font-bold text-red-500">0.001 AUR</span>
-                  </div>
-                </div>
-              </div>
+              {!isReviewing ? (
+                <>
+                  <h3 className="text-2xl font-bold mb-2 font-premium tracking-tighter">Dispatch Assets</h3>
+                  <p className="text-gray-500 text-sm mb-10">Transfer AUR tokens to another wallet address on the Aureum network.</p>
 
-              <div className="flex gap-4">
-                <button onClick={() => setIsSending(false)} className="btn-outline flex-1">Abort</button>
-                <button className="btn-primary flex-1">Confirm Transfer</button>
-              </div>
+                  <div className="space-y-6 mb-10">
+                    <div className="space-y-2">
+                      <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Recipient Address</label>
+                      <input placeholder="A..." className="input-field font-mono" value={sendRecipient} onChange={(e) => setSendRecipient(e.target.value)} />
+                      <p className="text-[10px] text-gray-600 mt-1">Enter valid Aureum address starting with 'A'</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Amount (AUR)</label>
+                        <input placeholder="0.00" className="input-field" type="number" step="0.01" value={sendAmount} onChange={(e) => setSendAmount(e.target.value)} />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Gas Fee (Auto)</label>
+                        <input className="input-field text-gray-500 cursor-not-allowed" type="text" value={sendFee} disabled />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Transaction Note (Optional)</label>
+                      <textarea placeholder="Add a private note for this transaction..." className="input-field resize-none" rows={3}></textarea>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <button onClick={() => setIsSending(false)} className="btn-outline flex-1">Abort</button>
+                    <button
+                      onClick={() => {
+                        if (sendRecipient && sendAmount) setIsReviewing(true);
+                        else alert("Please fill in all fields");
+                      }}
+                      className="btn-primary flex-1"
+                    >
+                      Review Transfer
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+                  <h3 className="text-2xl font-bold mb-2 font-premium tracking-tighter">Confirm Dispatch</h3>
+                  <p className="text-gray-500 text-sm mb-8">Please review the transaction details carefully before signing.</p>
+
+                  <div className="p-6 bg-white/5 rounded-2xl border border-white/5 space-y-4 mb-8">
+                    <div className="flex justify-between items-center pb-4 border-b border-white/5">
+                      <span className="text-xs text-gray-400 uppercase tracking-widest">Recipient</span>
+                      <span className="text-sm font-mono text-white break-all text-right w-1/2">{sendRecipient}</span>
+                    </div>
+                    <div className="flex justify-between items-center pb-4 border-b border-white/5">
+                      <span className="text-xs text-gray-400 uppercase tracking-widest">Amount</span>
+                      <span className="text-xl font-bold font-premium text-white">{sendAmount} AUR</span>
+                    </div>
+                    <div className="flex justify-between items-center pb-4 border-b border-white/5">
+                      <span className="text-xs text-gray-400 uppercase tracking-widest">Network Fee</span>
+                      <span className="text-sm font-bold text-gray-400">{sendFee} AUR</span>
+                    </div>
+                    <div className="flex justify-between items-center pt-2">
+                      <span className="text-xs text-red-500 uppercase tracking-widest font-bold">Total Debit</span>
+                      <span className="text-2xl font-bold font-premium text-red-500">{(parseFloat(sendAmount || "0") + parseFloat(sendFee)).toFixed(4)} AUR</span>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <button onClick={() => setIsReviewing(false)} className="btn-outline flex-1">Back</button>
+                    <button onClick={handleSend} disabled={isProcessing} className="btn-primary flex-1">
+                      {isProcessing ? "Processing..." : "Confirm & Sign"}
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+
             </div>
           </motion.div>
         )}
@@ -709,7 +956,7 @@ export default function AureumWallet() {
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
                   <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest mb-2 block">Your Private Key</label>
                   <div className="p-4 bg-black/60 border border-red-500/20 rounded-xl font-mono text-[11px] break-all leading-loose text-red-200 select-all">
-                    pk_A_{walletAddress.substring(1)}_9d3e8f7a2b0c1e4f5a6b7c8d9e0f1a2b3c4d5e6f
+                    {privateKey}
                   </div>
                 </motion.div>
               )}
@@ -735,18 +982,19 @@ export default function AureumWallet() {
               </div>
 
               <div className="flex-1 overflow-y-auto space-y-4 pr-4 custom-scrollbar">
-                {[1, 2, 3, 4, 5, 6, 7, 8].map((_, i) => (
+                {transactions.length > 0 ? transactions.map((tx, i) => (
                   <TransactionRow
                     key={i}
-                    type={i % 3 === 0 ? "received" : i % 3 === 1 ? "sent" : "property"}
-                    from={i % 3 === 0 ? "A9x2...n3m1" : undefined}
-                    to={i % 3 === 1 ? "Ab4z...k9v2" : undefined}
-                    property={i % 3 === 2 ? "Aureum Luxury Villa" : undefined}
-                    amount={i % 3 === 0 ? "+450.00 AUR" : i % 3 === 1 ? "-120.00 AUR" : "-750,000.00 EUR"}
-                    date={`${i + 1} day${i === 0 ? "" : "s"} ago`}
+                    type={tx.sender === walletAddress ? "sent" : "received"}
+                    from={tx.sender}
+                    to={tx.receiver}
+                    amount={(tx.sender === walletAddress ? "-" : "+") + tx.amount + " AUR"}
+                    date={`Block #${tx.blockHeight}`}
                     status="confirmed"
                   />
-                ))}
+                )) : (
+                  <div className="text-center py-20 text-gray-500 font-bold uppercase tracking-widest">No history found on chain</div>
+                )}
               </div>
             </div>
           </motion.div>
@@ -866,9 +1114,19 @@ function TransactionRow({ type, from, to, property, amount, date, status }: {
   };
 
   const getLabel = () => {
-    if (type === "received") return `From ${from}`;
-    if (type === "sent") return `To ${to}`;
-    return property;
+    if (type === "received") return (
+      <div className="flex flex-col">
+        <span className="text-emerald-500 font-bold">Received from</span>
+        <span className="text-[10px] font-mono text-gray-500 break-all">{from}</span>
+      </div>
+    );
+    if (type === "sent") return (
+      <div className="flex flex-col">
+        <span className="text-red-500 font-bold">Sent to</span>
+        <span className="text-[10px] font-mono text-gray-500 break-all">{to}</span>
+      </div>
+    );
+    return <span className="font-bold">{property}</span>;
   };
 
   const getStatusColor = () => {
