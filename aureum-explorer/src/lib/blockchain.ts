@@ -4,7 +4,32 @@
  * Provides methods to fetch and display live blockchain data
  */
 
-const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "http://localhost:8545";
+const DEFAULT_RPC = "http://localhost:8545";
+
+const detectRpcUrl = () => {
+    if (typeof window !== "undefined") {
+        const saved = localStorage.getItem("AUREUM_RPC_URL");
+        if (saved) return saved;
+
+        const host = window.location.hostname;
+        if (host !== "localhost" && host !== "127.0.0.1") {
+            return `http://${host}:8545`;
+        }
+    }
+    return process.env.NEXT_PUBLIC_RPC_URL || DEFAULT_RPC;
+};
+
+let currentRpcUrl = detectRpcUrl();
+
+export const getRpcUrl = () => currentRpcUrl;
+export const setSharedRpcUrl = (url: string) => {
+    currentRpcUrl = url;
+    if (typeof window !== "undefined") {
+        localStorage.setItem("AUREUM_RPC_URL", url);
+    }
+};
+
+export const RPC_URL = currentRpcUrl;
 
 interface RPCRequest {
     jsonrpc: "2.0";
@@ -32,7 +57,7 @@ async function rpcCall(method: string, params: any[] = []): Promise<any> {
     };
 
     try {
-        const response = await fetch(RPC_URL, {
+        const response = await fetch(currentRpcUrl, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -122,5 +147,3 @@ export async function isNodeOnline(): Promise<boolean> {
     const result = await getLatestBlock();
     return result !== null;
 }
-
-export { RPC_URL };

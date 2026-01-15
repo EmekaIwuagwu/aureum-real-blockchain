@@ -22,6 +22,7 @@ import {
   refundEscrow,
   listProperties,
   listEscrows,
+  getUserTransactions,
   RPC_URL,
   getRpcUrl,
   setSharedRpcUrl
@@ -171,16 +172,9 @@ export default function AureumWallet() {
       const es = await listEscrows();
       setEscrows(es);
 
-      const latest = await getLatestBlock();
-      if (latest && latest.transactions) {
-        const relevantTxs: any[] = [];
-        latest.transactions.forEach((tx: any) => {
-          if (tx.sender === walletAddress || tx.receiver === walletAddress) {
-            relevantTxs.push({ ...tx, blockHeight: latest.header.height });
-          }
-        });
-        setTransactions(relevantTxs);
-      }
+      // Fetch user transactions from recent blocks
+      const userTxs = await getUserTransactions(walletAddress, 20);
+      setTransactions(userTxs);
     } catch (e) {
       console.error("Failed to fetch wallet data", e);
     }

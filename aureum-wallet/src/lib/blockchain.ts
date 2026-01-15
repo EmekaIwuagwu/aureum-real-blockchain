@@ -519,6 +519,41 @@ export async function listEscrows(): Promise<any[]> {
 }
 
 /**
+ * Get recent transactions for a specific wallet address
+ */
+export async function getUserTransactions(address: string, blockCount: number = 20): Promise<any[]> {
+    try {
+        const latest = await getLatestBlock();
+        if (!latest) return [];
+
+        const transactions: any[] = [];
+        const startHeight = Math.max(0, latest.header.height - blockCount + 1);
+
+        // Fetch recent blocks and extract relevant transactions
+        for (let height = latest.header.height; height >= startHeight; height--) {
+            const block = await getBlockByNumber(height);
+            if (block && block.transactions) {
+                block.transactions.forEach((tx: any) => {
+                    if (tx.sender === address || tx.receiver === address) {
+                        transactions.push({
+                            ...tx,
+                            blockHeight: height,
+                            timestamp: block.header.timestamp
+                        });
+                    }
+                });
+            }
+        }
+
+        return transactions.sort((a, b) => b.blockHeight - a.blockHeight);
+    } catch (error) {
+        console.error("Failed to get user transactions:", error);
+        return [];
+    }
+}
+
+
+/**
  * Check if the node is online and responsive
  */
 export async function checkNodeHealth(): Promise<boolean> {
