@@ -126,23 +126,15 @@ export default function AureumWallet() {
     if (storedPrivateKey && !walletAddress) {
       loadWalletFromPrivateKey(storedPrivateKey);
     }
-
-    // Initial fetch
+    // Initial fetch and unified polling at 3 seconds (matches Explorer refresh rate)
     if (step === "dashboard" && walletAddress) {
       fetchWalletData();
 
-      // Auto-refresh every 3 seconds to show real-time updates
+      // Single unified interval - 3 seconds for real-time sync with Explorer
       const interval = setInterval(() => {
         fetchWalletData();
       }, 3000);
 
-      return () => clearInterval(interval);
-    }
-  }, [step, walletAddress]);
-
-  useEffect(() => {
-    if (step === "dashboard") {
-      const interval = setInterval(fetchWalletData, 5000);
       return () => clearInterval(interval);
     }
   }, [step, walletAddress]);
