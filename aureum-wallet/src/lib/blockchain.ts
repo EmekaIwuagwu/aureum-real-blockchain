@@ -374,11 +374,28 @@ export async function releaseEscrow(
     const nonceBytes = u64toBeBytes(nonce);
     const feeBytes = u64toBeBytes(10); // Standard fee
 
-    // TransactionType::EscrowRelease is variant index 12
-    const typeBytes = new Uint8Array([12]);
-    const idBytes = encodeString(escrowId);
+    // SCALE encode the TransactionType::EscrowRelease
+    // Enum index 12 for EscrowRelease, followed by SCALE-encoded String
+    const escrowIdBytes = encoder.encode(escrowId);
+    const escrowIdLen = escrowIdBytes.length;
 
-    const totalLen = senderBytes.length + receiverBytes.length + amountBytes.length + nonceBytes.length + feeBytes.length + pubKey.length + typeBytes.length + idBytes.length;
+    // SCALE compact encoding for string length
+    let lenBytes: Uint8Array;
+    if (escrowIdLen < 64) {
+        lenBytes = new Uint8Array([escrowIdLen << 2]);
+    } else {
+        // For longer strings, use multi-byte compact encoding
+        lenBytes = new Uint8Array([((escrowIdLen & 0x3F) << 2) | 0x01, (escrowIdLen >> 6) & 0xFF]);
+    }
+
+    // Build the SCALE-encoded tx_type: variant_index + compact_length + data
+    const txTypeEncoded = new Uint8Array(1 + lenBytes.length + escrowIdLen);
+    txTypeEncoded[0] = 12; // EscrowRelease variant index
+    txTypeEncoded.set(lenBytes, 1);
+    txTypeEncoded.set(escrowIdBytes, 1 + lenBytes.length);
+
+    const totalLen = senderBytes.length + receiverBytes.length + amountBytes.length +
+        nonceBytes.length + feeBytes.length + pubKey.length + txTypeEncoded.length;
     const message = new Uint8Array(totalLen);
 
     let offset = 0;
@@ -388,8 +405,7 @@ export async function releaseEscrow(
     message.set(nonceBytes, offset); offset += nonceBytes.length;
     message.set(feeBytes, offset); offset += feeBytes.length;
     message.set(pubKey, offset); offset += pubKey.length;
-    message.set(typeBytes, offset); offset += typeBytes.length;
-    message.set(idBytes, offset);
+    message.set(txTypeEncoded, offset);
 
     const signature = nacl.sign.detached(message, keyPair.secretKey);
 
@@ -427,11 +443,27 @@ export async function refundEscrow(
     const nonceBytes = u64toBeBytes(nonce);
     const feeBytes = u64toBeBytes(10);
 
-    // TransactionType::EscrowRefund is variant index 13
-    const typeBytes = new Uint8Array([13]);
-    const idBytes = encodeString(escrowId);
+    // SCALE encode the TransactionType::EscrowRefund
+    // Enum index 13 for EscrowRefund, followed by SCALE-encoded String
+    const escrowIdBytes = encoder.encode(escrowId);
+    const escrowIdLen = escrowIdBytes.length;
 
-    const totalLen = senderBytes.length + receiverBytes.length + amountBytes.length + nonceBytes.length + feeBytes.length + pubKey.length + typeBytes.length + idBytes.length;
+    // SCALE compact encoding for string length
+    let lenBytes: Uint8Array;
+    if (escrowIdLen < 64) {
+        lenBytes = new Uint8Array([escrowIdLen << 2]);
+    } else {
+        lenBytes = new Uint8Array([((escrowIdLen & 0x3F) << 2) | 0x01, (escrowIdLen >> 6) & 0xFF]);
+    }
+
+    // Build the SCALE-encoded tx_type: variant_index + compact_length + data
+    const txTypeEncoded = new Uint8Array(1 + lenBytes.length + escrowIdLen);
+    txTypeEncoded[0] = 13; // EscrowRefund variant index
+    txTypeEncoded.set(lenBytes, 1);
+    txTypeEncoded.set(escrowIdBytes, 1 + lenBytes.length);
+
+    const totalLen = senderBytes.length + receiverBytes.length + amountBytes.length +
+        nonceBytes.length + feeBytes.length + pubKey.length + txTypeEncoded.length;
     const message = new Uint8Array(totalLen);
 
     let offset = 0;
@@ -441,8 +473,7 @@ export async function refundEscrow(
     message.set(nonceBytes, offset); offset += nonceBytes.length;
     message.set(feeBytes, offset); offset += feeBytes.length;
     message.set(pubKey, offset); offset += pubKey.length;
-    message.set(typeBytes, offset); offset += typeBytes.length;
-    message.set(idBytes, offset);
+    message.set(txTypeEncoded, offset);
 
     const signature = nacl.sign.detached(message, keyPair.secretKey);
 
