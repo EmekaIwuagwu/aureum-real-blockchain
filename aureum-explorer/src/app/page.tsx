@@ -8,22 +8,10 @@ import {
   Zap, Database, Server, RefreshCcw, Home,
   CreditCard, Landmark, ExternalLink, ArrowLeft,
   Lock, CheckCircle2, User, MapPin, Building2,
-  FileText, TrendingUp, Layers, Wallet, Settings
+  FileText, TrendingUp, Layers, Wallet
 } from "lucide-react";
 
-import {
-  getLatestBlock,
-  getRecentBlocks,
-  isNodeOnline,
-  getBlockByNumber,
-  getChainState,
-  getValidators,
-  RPC_URL,
-  getRpcUrl,
-  setSharedRpcUrl
-} from "../lib/blockchain";
-
-type ViewType = "home" | "blocks" | "transactions" | "markets" | "assets" | "block_detail";
+import { getLatestBlock, getRecentBlocks, isNodeOnline, getBlockByNumber, getChainState, getValidators, RPC_URL } from "../lib/blockchain";
 
 const getTxTypeLabel = (txType: any) => {
   if (!txType || txType === "Transfer") return "Standard Transfer";
@@ -32,40 +20,6 @@ const getTxTypeLabel = (txType: any) => {
     return Object.keys(txType)[0].replace(/([A-Z])/g, ' $1').trim();
   }
   return "Unknown";
-};
-
-const copyToClipboard = async (text: string) => {
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(text);
-      alert("Copied to clipboard!");
-    } else {
-      throw new Error("Clipboard API unavailable");
-    }
-  } catch (e) {
-    const textArea = document.createElement("textarea");
-    textArea.value = text;
-    textArea.style.position = "fixed";
-    textArea.style.left = "-9999px";
-    textArea.style.top = "0";
-    textArea.style.opacity = "0";
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    try {
-      const successful = document.execCommand('copy');
-      if (successful) {
-        alert("Copied to clipboard!");
-      } else {
-        console.error("execCommand failed");
-        alert("Clipboard blocked. Please copy manually.");
-      }
-    } catch (err) {
-      console.error("Fallback error", err);
-      alert("Failed to copy. Please copy manually.");
-    }
-    document.body.removeChild(textArea);
-  }
 };
 
 export default function AureumExplorer() {
@@ -83,9 +37,6 @@ export default function AureumExplorer() {
 
   const [chainState, setChainState] = useState<any>(null);
   const [mounted, setMounted] = useState(false);
-
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [rpcInput, setRpcInput] = useState(getRpcUrl());
 
   useEffect(() => {
     setMounted(true);
@@ -263,20 +214,6 @@ export default function AureumExplorer() {
                 <MetricCard label="Current Block" value={latestBlock ? `#${latestBlock.header.height}` : "SYNCING..."} trend="Synced" icon={<Box className="text-gray-400" />} />
               </div>
 
-              {/* RPC Status Indicator */}
-              <div className="flex items-center gap-2 mb-4 px-1">
-                <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-red-500 animate-pulse"}`} />
-                <span className="text-[9px] uppercase font-bold tracking-[0.2em] text-gray-500">
-                  {isOnline ? `Node Online: ${getRpcUrl()}` : "Node Offline/Connecting..."}
-                </span>
-                <button
-                  onClick={() => setIsSettingsOpen(true)}
-                  className="ml-2 text-gray-600 hover:text-white transition-colors"
-                >
-                  <Settings size={12} />
-                </button>
-              </div>
-
               <div className="grid grid-cols-12 gap-10">
                 {/* Latest Block Stream */}
                 <div className="col-span-12 lg:col-span-6">
@@ -444,7 +381,7 @@ export default function AureumExplorer() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-10">
-              {/* Transaction Detail Modal Content */}
+              {/* Main Transaction Card */}
               <div className="lg:col-span-2 space-y-6">
                 <div className="explorer-card p-0 overflow-hidden">
                   <div className="p-8 border-b border-white/5 bg-white/[0.02]">
@@ -592,50 +529,6 @@ export default function AureumExplorer() {
         </motion.div>
       )}
 
-      {/* Settings Modal */}
-      <AnimatePresence>
-        {isSettingsOpen && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[10000] bg-black/95 backdrop-blur-3xl flex items-center justify-center p-6"
-          >
-            <div className="max-w-md w-full glass-panel p-10 border-white/5 space-y-8 shadow-2xl shadow-red-500/10">
-              <div>
-                <h3 className="text-2xl font-bold font-premium italic mb-2">Network Settings</h3>
-                <p className="text-gray-500 text-xs">Configure the institutional node fallback and RPC endpoints.</p>
-              </div>
-
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">RPC Endpoint</label>
-                  <input
-                    type="text"
-                    className="input-field w-full"
-                    value={rpcInput}
-                    onChange={(e) => setRpcInput(e.target.value)}
-                    placeholder="http://139.59.214.243:8545"
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-4">
-                <button onClick={() => setIsSettingsOpen(false)} className="btn-outline flex-1">Cancel</button>
-                <button
-                  onClick={() => {
-                    setSharedRpcUrl(rpcInput);
-                    setIsSettingsOpen(false);
-                    fetchData();
-                  }}
-                  className="btn-primary flex-1"
-                >
-                  Save & Reconnect
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Footer */}
       <footer className="border-t border-white/5 bg-black py-20 px-8">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-start gap-20">
@@ -758,7 +651,7 @@ function DetailRow({ label, value, copyable, isLink }: { label: string, value: s
     <div className="explorer-card p-6 flex flex-col md:flex-row md:items-center gap-4 transition-colors hover:bg-white/5">
       <div className="w-48 text-[10px] uppercase text-gray-500 font-black tracking-widest">{label}</div>
       <div className={`flex-1 font-mono text-xs leading-relaxed ${isLink ? "text-red-500 cursor-pointer hover:underline" : "text-gray-300"}`}>{value}</div>
-      {copyable && <button onClick={() => copyToClipboard(value)} className="text-gray-600 hover:text-white transition-colors uppercase text-[8px] font-bold tracking-widest px-3 py-1 bg-white/5 rounded">Copy</button>}
+      {copyable && <button className="text-gray-600 hover:text-white transition-colors uppercase text-[8px] font-bold tracking-widest px-3 py-1 bg-white/5 rounded">Copy</button>}
     </div>
   );
 }

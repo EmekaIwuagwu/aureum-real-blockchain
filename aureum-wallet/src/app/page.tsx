@@ -24,7 +24,7 @@ import {
   listEscrows,
   RPC_URL,
   getRpcUrl,
-  setGlobalRpcUrl
+  setSharedRpcUrl
 } from "../lib/blockchain";
 import nacl from "tweetnacl";
 import { keccak256 } from "js-sha3";
@@ -192,7 +192,11 @@ export default function AureumWallet() {
     setSelectedProperty(null);
   };
 
-
+  const handleSaveRpc = () => {
+    setSharedRpcUrl(rpcServer);
+    alert("RPC Endpoint updated: " + rpcServer);
+    fetchWalletData();
+  };
 
   const handleEscrowPay = async () => {
     if (!selectedProperty || !privateKey) return;
@@ -305,49 +309,41 @@ export default function AureumWallet() {
 
   const copyToClipboard = async (text: string) => {
     try {
+      // Try Clipboard API first (HTTPS only)
       if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(text);
         alert("Copied to clipboard!");
-      } else {
-        throw new Error("Clipboard API unavailable");
+        return;
       }
+      // Throw to trigger fallback
+      throw new Error("Clipboard API unavailable");
     } catch (e) {
-      // Robust Fallback
-      const textArea = document.createElement("textarea");
-      textArea.value = text;
-
-      // Ensure it's not visible but part of the DOM
-      textArea.style.position = "fixed";
-      textArea.style.left = "-9999px";
-      textArea.style.top = "0";
-      textArea.style.opacity = "0";
-      document.body.appendChild(textArea);
-
-      textArea.focus();
-      textArea.select();
-
+      // Fallback for HTTP/non-HTTPS environments
       try {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        textArea.style.top = "0";
+        textArea.style.opacity = "0";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+
         const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+
         if (successful) {
           alert("Copied to clipboard!");
         } else {
           console.error("execCommand failed");
-          alert("Clipboard blocked by browser. Please select the text and press Ctrl+C manually.");
+          alert("Clipboard blocked. Please copy manually: " + text);
         }
       } catch (err) {
         console.error("Fallback error", err);
-        alert("Copy failed. Please copy manually.");
+        alert("Failed to copy. Please copy manually: " + text);
       }
-
-      document.body.removeChild(textArea);
     }
-  };
-
-  const handleSaveRpc = () => {
-    setGlobalRpcUrl(rpcServer);
-    alert("RPC Configuration Updated: " + rpcServer);
-    // Restart polling or refresh
-    fetchWalletData();
   };
 
   const handleTokenize = async () => {
@@ -1010,25 +1006,44 @@ export default function AureumWallet() {
 
                   <div className="space-y-12">
                     <section>
-                      <h3 className="text-[10px] font-bold uppercase tracking-[0.3em] text-gray-500 mb-6 border-b border-white/5 pb-2">Network Endpoint</h3>
-                      <div className="flex gap-3">
-                        <input value={rpcServer} onChange={(e) => setRpcServer(e.target.value)} className="input-field font-mono text-sm" />
-                        <button className="btn-outline">Switch</button>
+                      <h3 className="text-xs uppercase text-gray-400 font-bold tracking-[0.2em] mb-6">Network Node Configuration</h3>
+                      <div className="core-card p-10 glass-panel border-white/5">
+                        <div className="space-y-6">
+                          <div>
+                            <label className="text-[10px] uppercase text-gray-500 font-bold mb-3 block tracking-widest">RPC Endpoint URL</label>
+                            <div className="flex gap-4">
+                              <input
+                                value={rpcServer}
+                                onChange={(e) => setRpcServer(e.target.value)}
+                                className="input-field flex-1 font-mono text-sm py-4 px-6"
+                                placeholder="http://139.59.214.243:8545"
+                              />
+                              <button
+                                onClick={handleSaveRpc}
+                                className="btn-primary py-4 px-10 text-xs font-bold uppercase tracking-widest"
+                              >
+                                Apply
+                              </button>
+                            </div>
+                            <p className="text-[10px] text-gray-600 mt-4 leading-relaxed font-premium italic">
+                              Connected to: {getRpcUrl()} • Changes persist in local storage.
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     </section>
 
                     <section>
-                      <h3 className="text-[10px] font-bold uppercase tracking-[0.3em] text-gray-500 mb-6 border-b border-white/5 pb-2">Security Hub</h3>
+                      <h3 className="text-xs uppercase text-gray-400 font-bold tracking-[0.2em] mb-6">Security & Recovery</h3>
                       <div className="space-y-4">
-                        <div className="p-6 core-card flex justify-between items-center group">
+                        <div className="p-6 core-card glass-panel border-white/5 flex justify-between items-center group hover:border-white/10 transition-all">
                           <div>
-                            <div className="font-bold mb-1">Export Private Key</div>
-                            <div className="text-xs text-gray-500">Emergency backup for external signing</div>
+                            <div className="font-bold text-gray-200 mb-1">Export Private Key</div>
+                            <div className="text-xs text-gray-500 italic">Emergency backup for external signing</div>
                           </div>
-                          <button onClick={handleExportPK} className="btn-outline py-2 px-6 text-[10px]">Export</button>
+                          <button onClick={handleExportPK} className="btn-outline py-2 px-8 text-[10px] uppercase font-bold tracking-widest">Export</button>
                         </div>
-
-                        <button className="w-full btn-outline py-4 text-xs font-bold tracking-widest transition-all hover:bg-red-600/10 hover:border-red-500/40">Modify Safety Password</button>
+                        <button className="w-full btn-outline py-5 text-[10px] font-black tracking-[0.2em] uppercase transition-all hover:bg-red-600/10 hover:border-red-500/40">Modify Safety Password</button>
                       </div>
                     </section>
                   </div>

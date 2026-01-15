@@ -8,7 +8,7 @@ const DEFAULT_RPC = "http://localhost:8545";
 
 const detectRpcUrl = () => {
     if (typeof window !== "undefined") {
-        // 1. Check localStorage first
+        // 1. Check localStorage first (user-configured)
         const saved = localStorage.getItem("AUREUM_RPC_URL");
         if (saved) return saved;
 
@@ -24,12 +24,15 @@ const detectRpcUrl = () => {
 let currentRpcUrl = detectRpcUrl();
 
 export const getRpcUrl = () => currentRpcUrl;
-export const setGlobalRpcUrl = (url: string) => {
+export const setSharedRpcUrl = (url: string) => {
     currentRpcUrl = url;
     if (typeof window !== "undefined") {
         localStorage.setItem("AUREUM_RPC_URL", url);
     }
 };
+
+// Export current server for initial state (deprecated, use getRpcUrl)
+export const RPC_URL = currentRpcUrl;
 
 interface RPCRequest {
     jsonrpc: "2.0";
@@ -62,6 +65,7 @@ async function rpcCall(method: string, params: any[] = []): Promise<any> {
     };
 
     try {
+        // We use the currentRpcUrl which can be updated at runtime
         const response = await fetch(currentRpcUrl, {
             method: "POST",
             headers: {
@@ -87,9 +91,6 @@ async function rpcCall(method: string, params: any[] = []): Promise<any> {
     }
 }
 
-/**
- * Helper to convert number to 8-byte BigEndian array
- */
 /**
  * Helper to convert number to 8-byte BigEndian array
  */
@@ -550,5 +551,4 @@ export function useBlockchainPoll(
     return () => clearInterval(interval);
 }
 
-// Export current server for initial state
-export const RPC_URL = currentRpcUrl;
+
