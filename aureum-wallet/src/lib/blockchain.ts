@@ -4,7 +4,19 @@
  * Provides type-safe methods to interact with the Aureum Layer 1 blockchain node
  */
 
-const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "http://localhost:8545";
+const getRpcUrl = () => {
+    if (process.env.NEXT_PUBLIC_RPC_URL) return process.env.NEXT_PUBLIC_RPC_URL;
+    if (typeof window !== "undefined") {
+        const host = window.location.hostname;
+        // If we're not on localhost, assume the RPC is on the same host at port 8545
+        if (host !== "localhost" && host !== "127.0.0.1" && !host.includes("0.0.0.0")) {
+            return `http://${host}:8545`;
+        }
+    }
+    return "http://localhost:8545";
+};
+
+const RPC_URL = getRpcUrl();
 
 interface RPCRequest {
     jsonrpc: "2.0";

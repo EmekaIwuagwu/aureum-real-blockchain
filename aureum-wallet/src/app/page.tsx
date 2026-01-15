@@ -310,26 +310,33 @@ export default function AureumWallet() {
         throw new Error("Clipboard API unavailable");
       }
     } catch (e) {
-      // Fallback for non-HTTPS environments (DigitalOcean IP access)
+      // Robust Fallback
       const textArea = document.createElement("textarea");
       textArea.value = text;
+
+      // Ensure it's not visible but part of the DOM
       textArea.style.position = "fixed";
       textArea.style.left = "-9999px";
       textArea.style.top = "0";
+      textArea.style.opacity = "0";
       document.body.appendChild(textArea);
+
       textArea.focus();
       textArea.select();
+
       try {
         const successful = document.execCommand('copy');
         if (successful) {
           alert("Copied to clipboard!");
         } else {
-          throw new Error("execCommand unsuccessful");
+          console.error("execCommand failed");
+          alert("Clipboard blocked by browser. Please select the text and press Ctrl+C manually.");
         }
       } catch (err) {
-        console.error("Fallback copy failed", err);
-        alert("Failed to copy automatically (Browser security). Please copy manually.");
+        console.error("Fallback error", err);
+        alert("Copy failed. Please copy manually.");
       }
+
       document.body.removeChild(textArea);
     }
   };

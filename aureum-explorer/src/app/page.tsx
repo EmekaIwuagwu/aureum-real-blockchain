@@ -38,6 +38,7 @@ const copyToClipboard = async (text: string) => {
     textArea.style.position = "fixed";
     textArea.style.left = "-9999px";
     textArea.style.top = "0";
+    textArea.style.opacity = "0";
     document.body.appendChild(textArea);
     textArea.focus();
     textArea.select();
@@ -46,10 +47,11 @@ const copyToClipboard = async (text: string) => {
       if (successful) {
         alert("Copied to clipboard!");
       } else {
-        throw new Error("execCommand unsuccessful");
+        console.error("execCommand failed");
+        alert("Clipboard blocked. Please copy manually.");
       }
     } catch (err) {
-      console.error("Fallback copy failed", err);
+      console.error("Fallback error", err);
       alert("Failed to copy. Please copy manually.");
     }
     document.body.removeChild(textArea);

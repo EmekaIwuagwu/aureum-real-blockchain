@@ -4,7 +4,18 @@
  * Provides methods to fetch and display live blockchain data
  */
 
-const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "http://localhost:8545";
+const getRpcUrl = () => {
+    if (process.env.NEXT_PUBLIC_RPC_URL) return process.env.NEXT_PUBLIC_RPC_URL;
+    if (typeof window !== "undefined") {
+        const host = window.location.hostname;
+        if (host !== "localhost" && host !== "127.0.0.1") {
+            return `http://${host}:8545`;
+        }
+    }
+    return "http://localhost:8545";
+};
+
+const RPC_URL = getRpcUrl();
 
 interface RPCRequest {
     jsonrpc: "2.0";
