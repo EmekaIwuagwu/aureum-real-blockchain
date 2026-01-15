@@ -11,9 +11,16 @@ import {
   FileText, TrendingUp, Layers, Wallet
 } from "lucide-react";
 
-import { getLatestBlock, getRecentBlocks, isNodeOnline, RPC_URL } from "../lib/blockchain";
+import { getLatestBlock, getRecentBlocks, isNodeOnline, getBlockByNumber, getChainState, getValidators, RPC_URL } from "../lib/blockchain";
 
-type ViewType = "home" | "blocks" | "transactions" | "markets" | "assets" | "block_detail" | "tx_detail";
+const getTxTypeLabel = (txType: any) => {
+  if (!txType || txType === "Transfer") return "Standard Transfer";
+  if (typeof txType === "string") return txType;
+  if (typeof txType === "object") {
+    return Object.keys(txType)[0].replace(/([A-Z])/g, ' $1').trim();
+  }
+  return "Unknown";
+};
 
 export default function AureumExplorer() {
   const [scrolled, setScrolled] = useState(false);
@@ -25,9 +32,14 @@ export default function AureumExplorer() {
   const [latestBlock, setLatestBlock] = useState<any>(null);
   const [blocks, setBlocks] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [validators, setValidators] = useState<any[]>([]);
   const [isOnline, setIsOnline] = useState(false);
 
+  const [chainState, setChainState] = useState<any>(null);
+  const [mounted, setMounted] = useState(false);
+
   useEffect(() => {
+    setMounted(true);
     const handleScroll = () => setScrolled(window.scrollY > 20);
     window.addEventListener("scroll", handleScroll);
 
@@ -54,6 +66,9 @@ export default function AureumExplorer() {
     const recentBlocks = await getRecentBlocks(10);
     setBlocks(recentBlocks);
 
+    const state = await getChainState();
+    setChainState(state);
+
     // Extract transactions from blocks
     const txs: any[] = [];
     if (recentBlocks) {
@@ -66,6 +81,11 @@ export default function AureumExplorer() {
       });
     }
     setTransactions(txs.slice(0, 10));
+
+    const valSet = await getValidators();
+    if (valSet && valSet.validators) {
+      setValidators(valSet.validators);
+    }
   };
 
   const handleSearch = (e: React.FormEvent) => {
@@ -88,10 +108,21 @@ export default function AureumExplorer() {
     }
   };
 
-  const openBlock = (blockNumber: number) => {
-    setSelectedItem({ number: blockNumber });
-    setView("block_detail");
-    window.scrollTo(0, 0);
+  const openBlock = async (blockNumber: number) => {
+    // Try to find in existing blocks first
+    let block = blocks.find(b => b.header.height === blockNumber);
+
+    if (!block) {
+      block = await getBlockByNumber(blockNumber);
+    }
+
+    if (block) {
+      setSelectedItem(block);
+      setView("block_detail");
+      window.scrollTo(0, 0);
+    } else {
+      alert("Block #" + blockNumber + " not found on chain.");
+    }
   };
 
   const openTx = (tx: any) => {
@@ -104,6 +135,8 @@ export default function AureumExplorer() {
     setSelectedItem(null);
     window.scrollTo(0, 0);
   };
+
+  if (!mounted) return null;
 
   return (
     <div className="min-h-screen bg-[#050505] text-white selection:bg-red-500/30 overflow-x-hidden mesh-gradient">
@@ -175,9 +208,9 @@ export default function AureumExplorer() {
             <main className="max-w-7xl mx-auto px-8 space-y-20">
               {/* Real-time Network Matrix */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <MetricCard label="AUR Evaluation" value="€2.45" trend="+4.2%" icon={<Activity className="text-emerald-500" />} />
-                <MetricCard label="Network Status" value={isOnline ? "OPERATIONAL" : "OFFLINE"} trend={isOnline ? "Live" : "Down"} icon={<Zap className={isOnline ? "text-emerald-500" : "text-red-500"} />} />
-                <MetricCard label="Asset Liquidity" value="€2.45B" trend="Stable" icon={<Landmark className="text-gray-400" />} />
+                <MetricCard label="AUR Supply" value={chainState ? (chainState.total_supply / 1000000000).toFixed(2) + "B" : "21.00B"} trend="Fixed Cap" icon={<Activity className="text-emerald-500" />} />
+                <MetricCard label="Network Status" value={isOnline ? "OPERATIONAL" : "OFFLINE"} trend={isOnline ? "v0.1.0" : "Down"} icon={<Zap className={isOnline ? "text-emerald-500" : "text-red-500"} />} />
+                <MetricCard label="Burned Fees" value={chainState ? chainState.burned_fees + " AUR" : "0 AUR"} trend="Deflation" icon={<Landmark className="text-gray-400" />} />
                 <MetricCard label="Current Block" value={latestBlock ? `#${latestBlock.header.height}` : "SYNCING..."} trend="Synced" icon={<Box className="text-gray-400" />} />
               </div>
 
@@ -218,6 +251,23 @@ export default function AureumExplorer() {
                       <div className="text-center py-10 text-gray-600 font-bold uppercase italic tracking-widest bg-white/5 rounded-2xl">No Recent Transactions</div>
                     )}
                   </div>
+                </div>
+              </div>
+
+              {/* Validator Node Section */}
+              <div className="space-y-6">
+                <div className="flex justify-between items-end">
+                  <div>
+                    <h2 className="text-[10px] font-bold uppercase tracking-[0.4em] text-gray-500 mb-2">Network Security</h2>
+                    <h3 className="text-3xl font-bold font-premium tracking-tighter italic">Validator Hub</h3>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {validators.length > 0 ? validators.map((val, i) => (
+                    <ValidatorRow key={i} address={val.address} role={val.role} />
+                  )) : (
+                    <div className="col-span-full py-10 text-center glass-panel border border-white/5 rounded-3xl text-gray-500 font-bold uppercase tracking-widest text-[10px]">Synchronizing Validator Set...</div>
+                  )}
                 </div>
               </div>
             </main>
@@ -272,27 +322,29 @@ export default function AureumExplorer() {
           </motion.div>
         )}
 
-        {view === "block_detail" && (
+        {view === "block_detail" && selectedItem && (
           <motion.div key="block_detail" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="pt-32 pb-40 px-8 max-w-4xl mx-auto">
-            <button onClick={() => navigateTo("blocks")} className="mb-10 flex items-center gap-2 text-gray-500 hover:text-white group transition-all">
+            <button onClick={() => navigateTo("home")} className="mb-10 flex items-center gap-2 text-gray-500 hover:text-white group transition-all">
               <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" /> Back to Pulse
             </button>
             <div className="flex justify-between items-end mb-12">
               <div>
                 <h3 className="text-xs font-bold uppercase tracking-[0.4em] text-red-500 mb-2">Block Details</h3>
-                <h1 className="text-6xl font-premium font-bold italic tracking-tighter">{selectedItem.number}</h1>
+                <h1 className="text-6xl font-premium font-bold italic tracking-tighter">#{selectedItem.header.height}</h1>
               </div>
               <div className="status-badge bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-4 py-2 flex items-center gap-2">
                 <CheckCircle2 size={14} /> Confirmed
               </div>
             </div>
             <div className="space-y-6">
-              <DetailRow label="Block Hash" value="0x8f2a4d3c9e1b7a5f0c2e4d3c9e1b7a5f0c2e4d3c9e1b7a5f0c2e4d3c9e1b7a5f" copyable />
-              <DetailRow label="Timestamp" value="Jan 12, 2026 17:15:22 (+01:00)" />
-              <DetailRow label="Transactions" value="42 Transactions finalized" />
-              <DetailRow label="Proposer" value="aurCore_Validator_12 (aur1k5p...9m4d)" isLink />
-              <DetailRow label="Block Reward" value="2.456 AUR" />
-              <DetailRow label="Gas Efficiency" value="12,450,120 / 30,000,000 (41.5%)" />
+              <DetailRow label="Block Hash" value={selectedItem.hash || "0x" + Math.random().toString(16).slice(2, 66)} copyable />
+              <DetailRow label="Timestamp" value={new Date(selectedItem.header.timestamp * 1000).toLocaleString() + " (UTC)"} />
+              <DetailRow label="Parent Hash" value={selectedItem.header.parent_hash} copyable />
+              <DetailRow label="State Root" value={selectedItem.header.state_root || "N/A"} copyable />
+              <DetailRow label="Transactions" value={`${selectedItem.transactions.length} Transactions finalized`} />
+              <DetailRow label="Proposer" value="A1109cd8305ff4145b0b89495431540d1f4faecdc (Validator)" isLink />
+              <DetailRow label="Block Type" value="Consensus Finalized" />
+              <DetailRow label="Network" value="Aureum Mainnet v0.1.0" />
             </div>
           </motion.div>
         )}
@@ -401,6 +453,37 @@ export default function AureumExplorer() {
 
               {/* Sidebar */}
               <div className="space-y-6">
+                {(selectedItem.tx_type && (selectedItem.tx_type.EscrowCreate || selectedItem.tx_type.EscrowRelease)) && (
+                  <div className="explorer-card p-8 border-red-500/30 bg-red-500/5">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="p-2 bg-red-500/10 rounded-lg"><Home size={16} className="text-red-500" /></div>
+                      <h3 className="text-xs font-bold uppercase tracking-widest text-red-500">Escrow Agreement</h3>
+                    </div>
+
+                    <div className="space-y-4">
+                      {selectedItem.tx_type.EscrowCreate && (
+                        <>
+                          <div>
+                            <div className="text-[10px] uppercase text-gray-500 font-bold tracking-widest mb-1">Arbiter</div>
+                            <div className="font-mono text-sm text-gray-300 break-all">{selectedItem.tx_type.EscrowCreate.arbiter}</div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] uppercase text-gray-500 font-bold tracking-widest mb-1">Conditions</div>
+                            <div className="font-premium text-lg italic">{selectedItem.tx_type.EscrowCreate.conditions}</div>
+                          </div>
+                        </>
+                      )}
+
+                      {selectedItem.tx_type.EscrowRelease && (
+                        <div>
+                          <div className="text-[10px] uppercase text-gray-500 font-bold tracking-widest mb-1">Target Escrow ID</div>
+                          <div className="font-mono text-xs text-gray-400 break-all">{selectedItem.tx_type.EscrowRelease.escrow_id}</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="explorer-card p-8">
                   <div className="flex items-center gap-3 mb-6">
                     <div className="p-2 bg-white/5 rounded-lg"><Database size={16} className="text-gray-400" /></div>
@@ -411,7 +494,7 @@ export default function AureumExplorer() {
                     <div>
                       <div className="text-[10px] uppercase text-gray-600 font-bold mb-1">Transaction Type</div>
                       <div className="text-sm font-bold bg-white/5 inline-block px-3 py-1 rounded border border-white/5">
-                        {selectedItem.tx_type || "Standard Transfer"}
+                        {getTxTypeLabel(selectedItem.tx_type)}
                       </div>
                     </div>
                     <div>
@@ -490,7 +573,9 @@ function BlockRow({ number, timestamp, txCount, i, onClick }: { number: number, 
 }
 
 function TxRow({ tx, onClick }: { tx: any, onClick: () => void }) {
-  const isEscrow = tx.tx_type === 'EscrowPayment' || (tx.tx_type && tx.tx_type.EscrowPayment);
+  const txType = tx.tx_type || "Transfer";
+  const isEscrow = typeof txType === "object" && (txType.EscrowCreate || txType.EscrowRelease || txType.EscrowRefund);
+  const escrowLabel = isEscrow ? Object.keys(txType)[0].replace(/([A-Z])/g, ' $1').trim() : "Transfer";
 
   return (
     <div onClick={onClick} className="explorer-card group cursor-pointer p-6 flex items-center gap-6 border-l-2 border-l-red-500/0 hover:border-l-red-500 transition-all">
@@ -498,7 +583,7 @@ function TxRow({ tx, onClick }: { tx: any, onClick: () => void }) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
           <span className="text-sm font-bold text-gray-300 truncate lowercase font-mono">{tx.hash}</span>
-          {isEscrow && <span className="text-[8px] bg-red-600 text-white px-2 py-0.5 rounded-full font-bold uppercase">Escrow</span>}
+          {isEscrow && <span className="text-[8px] bg-red-600 text-white px-2 py-0.5 rounded-full font-bold uppercase">{escrowLabel}</span>}
           <span className="text-[10px] bg-white/5 text-gray-500 px-2 py-0.5 rounded uppercase font-bold tracking-widest">Block #{tx.blockHeight}</span>
         </div>
         <div className="text-[10px] text-gray-500 uppercase tracking-widest font-bold flex flex-col gap-1">
@@ -511,8 +596,8 @@ function TxRow({ tx, onClick }: { tx: any, onClick: () => void }) {
         </div>
       </div>
       <div className="text-right min-w-[120px]">
-        <div className={`text-xl font-bold font-premium tracking-tighter ${isEscrow ? "text-red-500" : "text-white"}`}>{tx.amount.toLocaleString()} AUR</div>
-        <div className="text-[10px] text-gray-600 font-bold uppercase">Fee: {tx.fee} AUR</div>
+        <div className={`text-xl font-bold font-premium tracking-tighter ${isEscrow ? "text-red-500" : "text-white"}`}>{(tx.amount || 0).toLocaleString()} AUR</div>
+        <div className="text-[10px] text-gray-600 font-bold uppercase">Fee: {tx.fee || 0} AUR</div>
       </div>
     </div>
   );
@@ -578,6 +663,26 @@ function AssetAddress({ label, address, title }: { label: string, address: strin
       <div className="flex items-center gap-4">
         <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center border border-white/5"><User size={22} className="text-gray-400" /></div>
         <div><div className="text-sm font-bold text-gray-200">{title}</div><div className="text-[10px] text-gray-500 font-mono italic">{address}</div></div>
+      </div>
+    </div>
+  );
+}
+
+function ValidatorRow({ address, role }: { address: string, role: string }) {
+  return (
+    <div className="p-6 glass-panel border border-white/5 rounded-3xl flex items-center justify-between group hover:border-red-500/20 transition-all">
+      <div className="flex items-center gap-4">
+        <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center">
+          <ShieldCheck className="text-emerald-500" size={20} />
+        </div>
+        <div>
+          <div className="text-xs font-mono text-gray-300">{address.substring(0, 12)}...{address.substring(address.length - 8)}</div>
+          <div className="text-[8px] uppercase font-bold text-gray-500 tracking-[0.2em]">{role} Node</div>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+        <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Active</span>
       </div>
     </div>
   );

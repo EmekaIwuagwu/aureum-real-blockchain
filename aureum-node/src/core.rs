@@ -29,6 +29,9 @@ pub enum TransactionType {
     SubmitOracleReport { report: crate::oracle::OracleReport },
     TransferFraction { property_id: String, to: String, basis_points: u64 },
     CreateMultiSig { owners: Vec<String>, threshold: u8 },
+    EscrowCreate { arbiter: String, conditions: String },
+    EscrowRelease { escrow_id: String },
+    EscrowRefund { escrow_id: String },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode, PartialEq)]
@@ -237,3 +240,24 @@ pub struct MultiSigAccount {
     pub threshold: u8,
     pub nonce: u64,
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode, PartialEq)]
+pub enum EscrowStatus {
+    Pending,
+    Released,
+    Refunded,
+    Disputed,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
+pub struct Escrow {
+    pub id: String,
+    pub sender: String,
+    pub receiver: String,
+    pub arbiter: String,
+    pub amount: u64,
+    pub conditions: String,
+    pub status: EscrowStatus,
+    pub created_at: u64,
+}
+

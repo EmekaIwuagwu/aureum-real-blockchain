@@ -167,7 +167,7 @@ impl ChainStorage {
         let mut items = Vec::new();
         
         // Scan all state-relevant prefixes
-        for prefix in &[&b"balance:"[..], &b"property:"[..], &b"nonce:"[..], &b"compliance:"[..], &b"oracle_price:"[..]] {
+        for prefix in &[&b"balance:"[..], &b"property:"[..], &b"nonce:"[..], &b"compliance:"[..], &b"oracle_price:"[..], &b"escrow:"[..]] {
             for item in self.db.scan_prefix(*prefix) {
                 if let Ok((k, v)) = item {
                     items.push((k.to_vec(), v.to_vec()));
@@ -215,6 +215,17 @@ impl ChainStorage {
 
     pub fn get_multisig(&self, address: &str) -> Option<crate::core::MultiSigAccount> {
         self.db.get(format!("multisig:{}", address).as_bytes()).ok()?.and_then(|data| crate::core::MultiSigAccount::decode(&mut &data[..]).ok())
+    }
+
+    // --- Escrow Storage ---
+
+    pub fn save_escrow(&self, escrow: &crate::core::Escrow) {
+        let encoded = escrow.encode();
+        self.db.insert(format!("escrow:{}", escrow.id).as_bytes(), encoded).expect("Failed to save escrow");
+    }
+
+    pub fn get_escrow(&self, id: &str) -> Option<crate::core::Escrow> {
+        self.db.get(format!("escrow:{}", id).as_bytes()).ok()?.and_then(|data| crate::core::Escrow::decode(&mut &data[..]).ok())
     }
 
     /// Flush all pending writes to disk

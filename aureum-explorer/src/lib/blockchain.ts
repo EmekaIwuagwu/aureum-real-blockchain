@@ -102,6 +102,20 @@ export async function getProperty(propertyId: string): Promise<any> {
 }
 
 /**
+ * Get the chain state (total supply, burned fees)
+ */
+export async function getChainState(): Promise<any> {
+    return await rpcCall("aureum_getChainState", []);
+}
+
+/**
+ * Get active validator set
+ */
+export async function getValidators(): Promise<any> {
+    return await rpcCall("aureum_getValidators", []);
+}
+
+/**
  * Check node health
  */
 export async function isNodeOnline(): Promise<boolean> {

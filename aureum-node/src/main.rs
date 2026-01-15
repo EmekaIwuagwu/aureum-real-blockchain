@@ -1,4 +1,4 @@
-use aureum_node::core::{Transaction, Block, Validator, ValidatorRole, ValidatorSet, ChainState, BlockHeader, TransactionType};
+use aureum_node::core::{Transaction, Block, Validator, ValidatorRole, ValidatorSet, ChainState, BlockHeader, TransactionType, Property, VisaApplication, ApplicationStatus, VisaProgram, Escrow, EscrowStatus};
 use aureum_node::storage::ChainStorage;
 use aureum_node::consensus::{ConsensusEngine, BftStep};
 use aureum_node::vm::AureumVM;
@@ -245,15 +245,132 @@ async fn run_node(data_dir: &str, rpc_port: u16) {
                                             }
                                         }
                                         
-                                        _ => {
-                                            // Other transaction types (Stake, TokenizeProperty, etc.)
-                                            // For now, treat as simple transfers for the core amount
+                                        TransactionType::TokenizeProperty { address, metadata } => {
+                                            let prop = Property {
+                                                id: tx.hash(),
+                                                owner: tx.sender.clone(),
+                                                co_owners: vec![],
+                                                jurisdiction: "Portugal".to_string(), // Default for testnet
+                                                legal_description: address.clone(),
+                                                coordinates: (38.7223, -9.1393), // Lisbon coordinates
+                                                valuation_eur: tx.amount,
+                                                valuation_timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+                                                valuation_oracle: "AureumCoreOracle".to_string(),
+                                                title_deed_hash: hex::encode(metadata.as_bytes()),
+                                                survey_hash: "".to_string(),
+                                                visa_program_eligible: tx.amount >= 500_000,
+                                                minimum_investment_met: true,
+                                                kyc_status: 1,
+                                                aml_cleared: true,
+                                                mortgages: vec![],
+                                                liens: vec![],
+                                            };
+                                            storage_loop.save_property(&prop);
+                                            storage_loop.increment_nonce(&tx.sender);
+                                            info!("🏠 Property Tokenized: {} (Valuation: {} AUR)", prop.id, prop.valuation_eur);
+                                        }
+
+                                        TransactionType::ApplyForVisa { property_id, program } => {
+                                            let app = VisaApplication {
+                                                applicant: tx.sender.clone(),
+                                                property_id: property_id.clone(),
+                                                investment_amount: tx.amount,
+                                                program: program.clone(),
+                                                status: ApplicationStatus::Pending,
+                                                timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+                                            };
+                                            storage_loop.save_visa_application(&app);
+                                            storage_loop.increment_nonce(&tx.sender);
+                                            info!("🛂 Visa Application Submitted: {} for {:?}", app.applicant, app.program);
+                                        }
+
+                                        TransactionType::EscrowCreate { arbiter, conditions } => {
                                             let sender_balance = storage_loop.get_balance(&tx.sender);
-                                            if sender_balance >= tx.fee {
-                                                storage_loop.update_balance(&tx.sender, sender_balance - tx.fee);
+                                            let total_cost = tx.amount + tx.fee;
+                                            
+                                            if sender_balance >= total_cost {
+                                                // 1. Deduct funds
+                                                storage_loop.update_balance(&tx.sender, sender_balance - total_cost);
                                                 storage_loop.increment_nonce(&tx.sender);
-                                                info!("✅ Special Tx: {:?} from {}", tx.tx_type, tx.sender);
+
+                                                // 2. Create Escrow Record
+                                                let escrow = Escrow {
+                                                    id: tx.hash(),
+                                                    sender: tx.sender.clone(),
+                                                    receiver: tx.receiver.clone(),
+                                                    arbiter: arbiter.clone(),
+                                                    amount: tx.amount,
+                                                    conditions: conditions.clone(),
+                                                    status: EscrowStatus::Pending,
+                                                    created_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+                                                };
+                                                storage_loop.save_escrow(&escrow);
+                                                info!("🔒 Escrow Created: {} ({} AUR locked)", escrow.id, escrow.amount);
+                                            } else {
+                                                error!("❌ Escrow Create Failed: Insufficient Fund {}", tx.sender);
                                             }
+                                        }
+
+                                        TransactionType::EscrowRelease { escrow_id } => {
+                                            if let Some(mut escrow) = storage_loop.get_escrow(escrow_id) {
+                                                if escrow.status == EscrowStatus::Pending {
+                                                    // Only Arbiter or Sender can release
+                                                    if tx.sender == escrow.arbiter || tx.sender == escrow.sender {
+                                                        // Update Escrow State
+                                                        escrow.status = EscrowStatus::Released;
+                                                        storage_loop.save_escrow(&escrow);
+                                                        
+                                                        // Transfer Funds to Receiver
+                                                        let receiver_balance = storage_loop.get_balance(&escrow.receiver);
+                                                        storage_loop.update_balance(&escrow.receiver, receiver_balance + escrow.amount);
+                                                        
+                                                        // Pay Fee
+                                                        let sender_balance = storage_loop.get_balance(&tx.sender);
+                                                        if sender_balance >= tx.fee {
+                                                             storage_loop.update_balance(&tx.sender, sender_balance - tx.fee);
+                                                        }
+
+                                                        storage_loop.increment_nonce(&tx.sender);
+                                                        info!("🔓 Escrow Released: {} -> {} ({} AUR)", escrow_id, escrow.receiver, escrow.amount);
+                                                    } else {
+                                                        error!("❌ Escrow Release Failed: Unauthorized {}", tx.sender);
+                                                    }
+                                                } else {
+                                                     error!("❌ Escrow Release Failed: Status is {:?}", escrow.status);
+                                                }
+                                            }
+                                        }
+
+                                        TransactionType::EscrowRefund { escrow_id } => {
+                                            if let Some(mut escrow) = storage_loop.get_escrow(escrow_id) {
+                                                if escrow.status == EscrowStatus::Pending {
+                                                    // Only Arbiter can refund (or maybe receiver if they decline?) - Let's stick to Arbiter
+                                                    if tx.sender == escrow.arbiter {
+                                                        // Update Escrow State
+                                                        escrow.status = EscrowStatus::Refunded;
+                                                        storage_loop.save_escrow(&escrow);
+                                                        
+                                                        // Refund Funds to Sender
+                                                        let sender_balance = storage_loop.get_balance(&escrow.sender);
+                                                        storage_loop.update_balance(&escrow.sender, sender_balance + escrow.amount);
+                                                        
+                                                        // Pay Fee
+                                                        let arbiter_balance = storage_loop.get_balance(&tx.sender);
+                                                        if arbiter_balance >= tx.fee {
+                                                             storage_loop.update_balance(&tx.sender, arbiter_balance - tx.fee);
+                                                        }
+
+                                                        storage_loop.increment_nonce(&tx.sender);
+                                                        info!("↩️ Escrow Refunded: {} -> {} ({} AUR)", escrow_id, escrow.sender, escrow.amount);
+                                                    } else {
+                                                        error!("❌ Escrow Refund Failed: Unauthorized {}", tx.sender);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        
+                                        _ => {
+                                            // Other transaction types (Stake, etc.)
                                         }
                                     }
                                 }
@@ -418,12 +535,33 @@ async fn run_node(data_dir: &str, rpc_port: u16) {
     });
 
     let s_clone = storage.clone();
+    io.add_method("aureum_getValidators", move |_| {
+        let s = s_clone.clone();
+        async move {
+            let set = s.get_validator_set();
+            Ok(serde_json::to_value(set).unwrap_or(Value::Null))
+        }
+    });
+
+    let s_clone = storage.clone();
     io.add_method("aureum_getVisaStatus", move |params: Params| {
         let s = s_clone.clone();
         async move {
-            let addr: String = params.parse().unwrap();
-            let app = s.get_visa_application(&addr);
-            Ok(serde_json::to_value(app).unwrap())
+             let params: Vec<String> = params.parse().unwrap_or_default();
+             if params.is_empty() { return Ok(Value::Null); }
+             let app = s.get_visa_application(&params[0]);
+             Ok(serde_json::to_value(app).unwrap_or(Value::Null))
+        }
+    });
+
+    let s_clone = storage.clone();
+    io.add_method("aureum_getEscrow", move |params: Params| {
+        let s = s_clone.clone();
+        async move {
+            let params: Vec<String> = params.parse().unwrap_or_default();
+            if params.is_empty() { return Ok(Value::Null); }
+            let escrow = s.get_escrow(&params[0]);
+            Ok(serde_json::to_value(escrow).unwrap_or(Value::Null))
         }
     });
 

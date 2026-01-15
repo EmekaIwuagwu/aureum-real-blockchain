@@ -10,7 +10,7 @@ import {
   Search, Filter, CreditCard, Landmark, Check
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { getBalance, getNonce, signAndSendTransaction, getLatestBlock, RPC_URL } from "../lib/blockchain";
+import { getBalance, getNonce, signAndSendTransaction, getLatestBlock, tokenizeProperty, applyForVisa, createEscrow, releaseEscrow, RPC_URL } from "../lib/blockchain";
 import nacl from "tweetnacl";
 import { keccak256 } from "js-sha3";
 
@@ -93,6 +93,11 @@ export default function AureumWallet() {
   const [sendFee, setSendFee] = useState("0.001");
   const [isProcessing, setIsProcessing] = useState(false);
   const [isReviewing, setIsReviewing] = useState(false);
+  const [isTokenizing, setIsTokenizing] = useState(false);
+  const [tokenizeData, setTokenizeData] = useState({ address: "", val: "", meta: "" });
+  const [isApplyingVisa, setIsApplyingVisa] = useState(false);
+  const [visaData, setVisaData] = useState({ propertyId: "", programIndex: 0 });
+  const [currentEscrowId, setCurrentEscrowId] = useState("");
 
   useEffect(() => {
     const words = "luxury asset golden visa chain property secure investment global portal premium speed liquidity".split(" ");
@@ -159,40 +164,60 @@ export default function AureumWallet() {
 
 
   const handleEscrowPay = async () => {
+    if (!selectedProperty || !privateKey) return;
     setIsPayingEscrow(true);
-    // Simulate smart contract interaction for locking funds
-    setTimeout(async () => {
-      // Send transaction to Escrow Smart Contract (Simulated)
-      if (walletAddress) {
-        try {
-          const tx = {
-            sender: walletAddress,
-            receiver: "ESCROW_VAULT",
-            amount: 50000,
-            nonce: nonce + 1,
-            fee: 1,
-            signature: [],
-            pub_key: [],
-            tx_type: 'ContractCall'
-          };
-          // In real app we would sign and send this.
-          // For demo, we just update UI state to Locked.
-        } catch (e) { }
-      }
+    try {
+      // Create Escrow with the landlord as the receiver and the user (sender) as the arbiter for demo flexibility
+      // In a real scenario, the arbiter would be a 3rd party (e.g. Validator or Legal Firm)
+      // Amount is hardcoded to 50,000 AUR for demo
+      const hash = await createEscrow(
+        walletAddress,
+        "A1109cd8305ff4145b0b89495431540d1f4faecdc", // Default Validator/Landlord for demo
+        walletAddress, // Self-Arbtered for demo ease
+        50000,
+        `Purchase of ${selectedProperty.name}`,
+        nonce,
+        privateKey
+      );
 
+      if (hash && hash.startsWith("A") || hash.length > 10) {
+        setCurrentEscrowId(hash);
+        setEscrowStep("locked");
+        fetchWalletData();
+        alert("Funds Locked in Escrow! ID: " + hash);
+      } else {
+        alert("Escrow Failed: " + hash);
+      }
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    } finally {
       setIsPayingEscrow(false);
-      setEscrowStep("locked");
-    }, 2000);
+    }
   };
 
-  const handleReleaseFunds = () => {
+  const handleReleaseFunds = async () => {
+    if (!currentEscrowId || !privateKey) return;
     setIsPayingEscrow(true);
-    setTimeout(() => {
+    try {
+      const hash = await releaseEscrow(
+        walletAddress,
+        currentEscrowId,
+        nonce,
+        privateKey
+      );
+
+      if (hash) {
+        setEscrowStep("completed");
+        setPaymentSuccess(true);
+        setTimeout(() => setPaymentSuccess(false), 3000);
+        fetchWalletData();
+        alert("Funds Released successfully!");
+      }
+    } catch (e: any) {
+      alert("Release Error: " + e.message);
+    } finally {
       setIsPayingEscrow(false);
-      setEscrowStep("completed");
-      setPaymentSuccess(true);
-      setTimeout(() => setPaymentSuccess(false), 3000);
-    }, 2000);
+    }
   };
 
   const handleExportPK = () => {
@@ -257,6 +282,33 @@ export default function AureumWallet() {
     }
   };
 
+  const handleTokenize = async () => {
+    if (!tokenizeData.address || !tokenizeData.val || !privateKey) return;
+    setIsProcessing(true);
+    try {
+      const hash = await tokenizeProperty(
+        walletAddress,
+        tokenizeData.address,
+        parseFloat(tokenizeData.val),
+        tokenizeData.meta || "Bespoke Asset",
+        nonce,
+        privateKey
+      );
+      if (hash && (hash.startsWith("A") || hash.length > 10)) {
+        alert("Property Tokenized Successfully! Asset ID: " + hash);
+        setIsTokenizing(false);
+        setTokenizeData({ address: "", val: "", meta: "" });
+        fetchWalletData();
+      } else {
+        alert("Tokenization Failed: " + hash);
+      }
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleSend = async () => {
     if (!sendRecipient || !sendAmount || !privateKey) return;
     setIsProcessing(true);
@@ -278,6 +330,37 @@ export default function AureumWallet() {
         fetchWalletData();
       } else {
         alert("Transaction Failed: " + hash);
+      }
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleApplyForVisa = async () => {
+    if (!visaData.propertyId || !privateKey) {
+      alert("Please enter a valid Property ID");
+      return;
+    }
+    setIsProcessing(true);
+    try {
+      const hash = await applyForVisa(
+        walletAddress,
+        visaData.propertyId,
+        visaData.programIndex,
+        500000, // Standard min investment
+        nonce,
+        privateKey
+      );
+      if (hash && hash.startsWith("A")) {
+        alert("Visa Application Submitted! Application Hash: " + hash);
+        setIsApplyingVisa(false);
+        setSelectedMarket(null);
+        setVisaData({ propertyId: "", programIndex: 0 });
+        fetchWalletData();
+      } else {
+        alert("Application Failed: " + hash);
       }
     } catch (e: any) {
       alert("Error: " + e.message);
@@ -591,6 +674,12 @@ export default function AureumWallet() {
                       <h1 className="text-5xl font-bold font-premium tracking-tighter italic">Bespoke Listings</h1>
                     </div>
                     <div className="flex gap-4">
+                      <button
+                        onClick={() => setIsTokenizing(true)}
+                        className="btn-primary py-2 px-6 flex items-center gap-2 text-xs"
+                      >
+                        <Plus size={16} /> Tokenize Asset
+                      </button>
                       <div className="relative">
                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600" size={16} />
                         <input placeholder="Filter location..." className="bg-[#121212] border border-white/5 py-3 pl-12 pr-6 rounded-xl text-sm outline-none focus:border-red-500" />
@@ -809,12 +898,76 @@ export default function AureumWallet() {
           </motion.div>
         )}
 
+        {isTokenizing && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-6"
+          >
+            <div className="max-w-lg w-full core-card p-10 glass-panel border-white/10">
+              <h3 className="text-2xl font-bold mb-2 font-premium tracking-tighter">Tokenize Physical Asset</h3>
+              <p className="text-gray-500 text-sm mb-10">Register a new property to the Aureum Immutable Ledger.</p>
+
+              <div className="space-y-6 mb-10">
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Physical Address</label>
+                  <input
+                    placeholder="e.g. 123 Luxury Ave, Lisbon"
+                    className="input-field"
+                    value={tokenizeData.address}
+                    onChange={(e) => setTokenizeData({ ...tokenizeData, address: e.target.value })}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Valuation (AUR)</label>
+                    <input
+                      placeholder="500,000"
+                      className="input-field"
+                      type="number"
+                      value={tokenizeData.val}
+                      onChange={(e) => setTokenizeData({ ...tokenizeData, val: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Jurisdiction</label>
+                    <select className="input-field bg-black text-white outline-none appearance-none">
+                      <option>Portugal (Golden Visa)</option>
+                      <option>UAE (Dubai Marina)</option>
+                      <option>UK (London Mayfair)</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Metadata / Legal Link</label>
+                  <input
+                    placeholder="https://ipfs.io/ipfs/..."
+                    className="input-field"
+                    value={tokenizeData.meta}
+                    onChange={(e) => setTokenizeData({ ...tokenizeData, meta: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <button onClick={() => setIsTokenizing(false)} className="btn-outline flex-1">Abort</button>
+                <button
+                  onClick={handleTokenize}
+                  className="btn-primary flex-1"
+                  disabled={isProcessing}
+                >
+                  {isProcessing ? "Finalizing..." : "Mint Asset NFT"}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {isSending && (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-6">
+            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-6"
+          >
             <div className="max-w-lg w-full core-card p-10 glass-panel border-white/10">
-
               {!isReviewing ? (
                 <>
                   <h3 className="text-2xl font-bold mb-2 font-premium tracking-tighter">Dispatch Assets</h3>
@@ -887,16 +1040,15 @@ export default function AureumWallet() {
                   </div>
                 </motion.div>
               )}
-
             </div>
           </motion.div>
         )}
 
-        {/* PASSWORD PROMPT FOR PRIVATE KEY */}
         {showPasswordPrompt && (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-6">
+            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-6"
+          >
             <div className="max-w-md w-full core-card p-10 glass-panel border-red-500/20">
               <div className="flex items-center gap-4 mb-6">
                 <div className="w-12 h-12 rounded-full bg-red-600/10 flex items-center justify-center">
@@ -929,11 +1081,11 @@ export default function AureumWallet() {
           </motion.div>
         )}
 
-        {/* PRIVATE KEY WARNING */}
         {showPKWarning && (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-6">
+            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-6"
+          >
             <div className="max-w-lg w-full core-card p-10 glass-panel border-red-500/20">
               <div className="flex items-center gap-4 mb-6">
                 <div className="w-14 h-14 rounded-full bg-red-600/20 flex items-center justify-center animate-pulse">
@@ -970,11 +1122,12 @@ export default function AureumWallet() {
             </div>
           </motion.div>
         )}
-        {/* FULL TRANSACTION HISTORY */}
+
         {showAllTransactions && (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-3xl flex items-center justify-center p-6">
+            className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-3xl flex items-center justify-center p-6"
+          >
             <div className="max-w-4xl w-full core-card p-10 glass-panel border-white/10 flex flex-col max-h-[90vh]">
               <div className="flex justify-between items-center mb-10">
                 <h3 className="text-3xl font-bold font-premium tracking-tighter italic">Ledger Explorer</h3>
@@ -982,7 +1135,7 @@ export default function AureumWallet() {
               </div>
 
               <div className="flex-1 overflow-y-auto space-y-4 pr-4 custom-scrollbar">
-                {transactions.length > 0 ? transactions.map((tx, i) => (
+                {transactions.length > 0 ? transactions.map((tx: any, i) => (
                   <TransactionRow
                     key={i}
                     type={tx.sender === walletAddress ? "sent" : "received"}
@@ -1000,11 +1153,11 @@ export default function AureumWallet() {
           </motion.div>
         )}
 
-        {/* MARKET DETAIL */}
         {selectedMarket && (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-6">
+            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-6"
+          >
             <div className="max-w-2xl w-full core-card p-12 glass-panel border-red-500/20">
               <div className="flex items-center gap-6 mb-10">
                 <div className="w-20 h-20 rounded-3xl bg-red-600/10 flex items-center justify-center text-red-500">
@@ -1036,7 +1189,88 @@ export default function AureumWallet() {
 
               <div className="flex gap-4">
                 <button onClick={() => setSelectedMarket(null)} className="btn-outline flex-1">Back to Ecosystem</button>
-                <button className="btn-primary flex-1">Initiate Investment</button>
+                <button
+                  onClick={() => {
+                    if (selectedMarket === "Visa Programs") setIsApplyingVisa(true);
+                    else alert("Institutional entry for this instrument is currently limited to verified profiles.");
+                  }}
+                  className="btn-primary flex-1"
+                >
+                  Initiate Investment
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {isApplyingVisa && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-6"
+          >
+            <div className="max-w-lg w-full core-card p-10 glass-panel border-red-500/20">
+              <div className="flex items-center gap-4 mb-8">
+                <div className="w-12 h-12 rounded-full bg-red-600/10 flex items-center justify-center text-red-500">
+                  <Globe size={24} />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold font-premium tracking-tighter">Visa Application</h3>
+                  <p className="text-gray-500 text-xs uppercase tracking-widest font-bold">Residency by Investment</p>
+                </div>
+              </div>
+
+              <div className="space-y-6 mb-10">
+                <div className="p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-xl mb-6">
+                  <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest leading-relaxed">
+                    Note: You must own a tokenized property with a minimum valuation of 500,000 AUR to be eligible for these programs.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Select Program</label>
+                  <select
+                    className="input-field bg-black text-white outline-none appearance-none"
+                    value={visaData.programIndex}
+                    onChange={(e) => setVisaData({ ...visaData, programIndex: parseInt(e.target.value) })}
+                  >
+                    <option value={0}>Portugal Golden Visa (ARI)</option>
+                    <option value={1}>UAE Golden Visa (10-Year)</option>
+                    <option value={2}>UK High Value Residency (Tier 1)</option>
+                    <option value={3}>Malta citizenship by Naturalisation</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase text-gray-500 font-bold tracking-widest">Property Transaction Hash / ID</label>
+                  <input
+                    placeholder="Enter the hash of your tokenized property"
+                    className="input-field font-mono text-xs"
+                    value={visaData.propertyId}
+                    onChange={(e) => setVisaData({ ...visaData, propertyId: e.target.value })}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 core-card space-y-1">
+                    <div className="text-[8px] uppercase text-gray-500 font-bold">Application Fee</div>
+                    <div className="text-sm font-bold">25 AUR</div>
+                  </div>
+                  <div className="p-4 core-card space-y-1">
+                    <div className="text-[8px] uppercase text-gray-500 font-bold">Processing Time</div>
+                    <div className="text-sm font-bold">Immediate (On-Chain)</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <button onClick={() => setIsApplyingVisa(false)} className="btn-outline flex-1">Cancel</button>
+                <button
+                  onClick={handleApplyForVisa}
+                  className="btn-primary flex-1"
+                  disabled={isProcessing}
+                >
+                  {isProcessing ? "Transmitting..." : "Submit Application"}
+                </button>
               </div>
             </div>
           </motion.div>
