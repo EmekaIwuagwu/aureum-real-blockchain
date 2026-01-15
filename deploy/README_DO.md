@@ -14,35 +14,34 @@ git clone https://github.com/EmekaIwuagwu/aureum-real-blockchain.git
 cd aureum-real-blockchain
 ```
 
-## 3. Run Deployment Scripts
-Make the scripts executable and run them in order:
+## 3. Run Unified Installer
+Everything is consolidated into a single installer script that handles system dependencies, Rust/NodeJS installation, building for production, and launching services.
 
-### A. Environment Setup
-Installs Rust, Node.js, and PM2.
 ```bash
-chmod +x deploy/*.sh
-./deploy/install.sh
+chmod +x setup.sh
+./setup.sh
 ```
 
-### B. Build Everything
-Compiles the Rust node and installs frontend dependencies.
-```bash
-./deploy/build.sh
-```
-
-### C. Launch
-Starts the Node, Wallet, and Explorer in the background.
-```bash
-./deploy/run.sh
-```
+The script will:
+1. Detect your public IP for RPC communication.
+2. Install Rust, Node.js, and PM2.
+3. Build the Aureum Rust Node.
+4. Build the Wallet and Explorer for **Production** (optimized for servers).
+5. Initialize the blockchain data.
+6. Launch all services via PM2.
 
 ## 4. Monitoring
-Check the status of your services:
+Check the status of your live services:
 ```bash
 pm2 list
 pm2 logs aureum-node
 pm2 logs aureum-wallet
+pm2 logs aureum-explorer
 ```
 
-## 5. Security Note (Pre-Testnet)
-Currently, the services run in `dev` mode. For a public testnet, ensure you update `ecosystem.config.js` to use `npm run build && npm run start` for the frontends to improve performance.
+## 5. Security & Access
+- **Wallet**: `http://YOUR_SERVER_IP:3000`
+- **Explorer**: `http://YOUR_SERVER_IP:3001`
+- **RPC RPC**: `http://YOUR_SERVER_IP:8545`
+
+Ensure your DigitalOcean Firewall or `ufw` allows incoming traffic on these three ports.

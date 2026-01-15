@@ -382,6 +382,59 @@ export async function releaseEscrow(
 }
 
 /**
+ * Refund funds from an Escrow (Arbiter only)
+ */
+export async function refundEscrow(
+    sender: string,
+    escrowId: string,
+    nonce: number,
+    privateKeyHex: string
+): Promise<string> {
+    const encoder = new TextEncoder();
+    const pkBytes = new Uint8Array(privateKeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const keyPair = nacl.sign.keyPair.fromSeed(pkBytes);
+    const pubKey = keyPair.publicKey;
+
+    const senderBytes = encoder.encode(sender);
+    const receiverBytes = encoder.encode("0");
+    const amountBytes = u64toBeBytes(0);
+    const nonceBytes = u64toBeBytes(nonce);
+    const feeBytes = u64toBeBytes(10);
+
+    // TransactionType::EscrowRefund is variant index 13
+    const typeBytes = new Uint8Array([13]);
+    const idBytes = encodeString(escrowId);
+
+    const totalLen = senderBytes.length + receiverBytes.length + amountBytes.length + nonceBytes.length + feeBytes.length + pubKey.length + typeBytes.length + idBytes.length;
+    const message = new Uint8Array(totalLen);
+
+    let offset = 0;
+    message.set(senderBytes, offset); offset += senderBytes.length;
+    message.set(receiverBytes, offset); offset += receiverBytes.length;
+    message.set(amountBytes, offset); offset += amountBytes.length;
+    message.set(nonceBytes, offset); offset += nonceBytes.length;
+    message.set(feeBytes, offset); offset += feeBytes.length;
+    message.set(pubKey, offset); offset += pubKey.length;
+    message.set(typeBytes, offset); offset += typeBytes.length;
+    message.set(idBytes, offset);
+
+    const signature = nacl.sign.detached(message, keyPair.secretKey);
+
+    const tx = {
+        sender,
+        receiver: "0",
+        amount: 0,
+        nonce,
+        fee: 10,
+        signature: Array.from(signature),
+        pub_key: Array.from(pubKey),
+        tx_type: { EscrowRefund: { escrow_id: escrowId } }
+    };
+
+    return await rpcCall("aureum_submitTransaction", [tx]);
+}
+
+/**
  * Get account balance in AUR
  */
 export async function getBalance(address: string): Promise<number> {
@@ -423,6 +476,20 @@ export async function getProperty(propertyId: string): Promise<any> {
  */
 export async function getVisaStatus(applicant: string): Promise<any> {
     return await rpcCall("aureum_getVisaStatus", [applicant]);
+}
+
+/**
+ * List all tokenized properties
+ */
+export async function listProperties(): Promise<any[]> {
+    return await rpcCall("aureum_listProperties", []);
+}
+
+/**
+ * List all escrows
+ */
+export async function listEscrows(): Promise<any[]> {
+    return await rpcCall("aureum_listEscrows", []);
 }
 
 /**

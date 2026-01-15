@@ -228,6 +228,22 @@ impl ChainStorage {
         self.db.get(format!("escrow:{}", id).as_bytes()).ok()?.and_then(|data| crate::core::Escrow::decode(&mut &data[..]).ok())
     }
 
+    pub fn list_properties(&self) -> Vec<crate::core::Property> {
+        self.db.scan_prefix(b"property:")
+            .filter_map(|item| {
+                item.ok().and_then(|(_, v)| crate::core::Property::decode(&mut &v[..]).ok())
+            })
+            .collect()
+    }
+
+    pub fn list_escrows(&self) -> Vec<crate::core::Escrow> {
+        self.db.scan_prefix(b"escrow:")
+            .filter_map(|item| {
+                item.ok().and_then(|(_, v)| crate::core::Escrow::decode(&mut &v[..]).ok())
+            })
+            .collect()
+    }
+
     /// Flush all pending writes to disk
     pub fn flush(&self) {
         self.db.flush().expect("Failed to flush database");

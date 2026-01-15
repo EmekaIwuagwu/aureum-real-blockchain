@@ -565,6 +565,24 @@ async fn run_node(data_dir: &str, rpc_port: u16) {
         }
     });
 
+    let s_clone = storage.clone();
+    io.add_method("aureum_listProperties", move |_| {
+        let s = s_clone.clone();
+        async move {
+            let props = s.list_properties();
+            Ok(serde_json::to_value(props).unwrap())
+        }
+    });
+
+    let s_clone = storage.clone();
+    io.add_method("aureum_listEscrows", move |_| {
+        let s = s_clone.clone();
+        async move {
+            let escrows = s.list_escrows();
+            Ok(serde_json::to_value(escrows).unwrap())
+        }
+    });
+
     let server = ServerBuilder::new(io)
         .start_http(&format!("0.0.0.0:{}", rpc_port).parse().unwrap())
         .expect("RPC start failed");

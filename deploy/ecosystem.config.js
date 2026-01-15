@@ -18,20 +18,14 @@ module.exports = {
         {
             name: "aureum-wallet",
             script: "npm",
-            args: "run dev -- --port 3000",
-            cwd: "./aureum-wallet",
-            env: {
-                NEXT_PUBLIC_RPC_URL: "http://localhost:8545"
-            }
+            args: "run start -- --port 3000",
+            cwd: "./aureum-wallet"
         },
         {
             name: "aureum-explorer",
             script: "npm",
-            args: "run dev -- --port 3001",
-            cwd: "./aureum-explorer",
-            env: {
-                NEXT_PUBLIC_RPC_URL: "http://localhost:8545"
-            }
+            args: "run start -- --port 3001",
+            cwd: "./aureum-explorer"
         }
     ]
 };

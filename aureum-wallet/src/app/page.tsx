@@ -10,7 +10,20 @@ import {
   Search, Filter, CreditCard, Landmark, Check
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { getBalance, getNonce, signAndSendTransaction, getLatestBlock, tokenizeProperty, applyForVisa, createEscrow, releaseEscrow, RPC_URL } from "../lib/blockchain";
+import {
+  getBalance,
+  getNonce,
+  signAndSendTransaction,
+  getLatestBlock,
+  tokenizeProperty,
+  applyForVisa,
+  createEscrow,
+  releaseEscrow,
+  refundEscrow,
+  listProperties,
+  listEscrows,
+  RPC_URL
+} from "../lib/blockchain";
 import nacl from "tweetnacl";
 import { keccak256 } from "js-sha3";
 
@@ -91,6 +104,8 @@ export default function AureumWallet() {
   const [sendRecipient, setSendRecipient] = useState("");
   const [sendAmount, setSendAmount] = useState("");
   const [sendFee, setSendFee] = useState("0.001");
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [escrows, setEscrows] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isReviewing, setIsReviewing] = useState(false);
   const [isTokenizing, setIsTokenizing] = useState(false);
@@ -137,12 +152,26 @@ export default function AureumWallet() {
       const n = await getNonce(walletAddress);
       setNonce(n);
 
+      const props = await listProperties();
+      const mappedProps: Property[] = props.map((p: any) => ({
+        id: p.id,
+        name: p.legal_description.includes(',') ? p.legal_description.split(',')[0] : "Aureum Premium Estate",
+        location: p.jurisdiction + (p.legal_description ? `, ${p.legal_description}` : ""),
+        price: `${(p.valuation_eur / 1000).toFixed(0)}k AUR`,
+        yield: "6.2%", // Default yield for on-chain props
+        landlord: p.owner.substring(0, 10) + "...",
+        phone: "+351 XXX XXX XXX",
+        description: `Tokenized Real Estate Asset on Aureum L1. Valuation: ${p.valuation_eur} EUR. Eligible for Golden Visa.`,
+        image: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&q=80&w=800" // Default image for demo
+      }));
+      setProperties([...PROPERTIES, ...mappedProps]);
+
+      const es = await listEscrows();
+      setEscrows(es);
+
       const latest = await getLatestBlock();
       if (latest && latest.transactions) {
-        // Filter transactions for this wallet
         const relevantTxs: any[] = [];
-        // In a real scenario, we'd scan multiple blocks. 
-        // For now, let's just show the latest block's txs if they belong to us.
         latest.transactions.forEach((tx: any) => {
           if (tx.sender === walletAddress || tx.receiver === walletAddress) {
             relevantTxs.push({ ...tx, blockHeight: latest.header.height });
@@ -561,6 +590,7 @@ export default function AureumWallet() {
               <nav className="flex-1 space-y-3">
                 <SidebarItem icon={<Wallet size={20} />} label="Portfolio" active={activeTab === "assets"} onClick={() => setActiveTab("assets")} />
                 <SidebarItem icon={<Home size={20} />} label="Real Estate" active={activeTab === "real-estate"} onClick={() => setActiveTab("real-estate")} />
+                <SidebarItem icon={<Shield size={20} />} label="Escrows" active={activeTab === "escrows"} onClick={() => setActiveTab("escrows")} />
                 <SidebarItem icon={<Globe size={20} />} label="Markets" active={activeTab === "markets"} onClick={() => setActiveTab("markets")} />
                 <SidebarItem icon={<Settings size={20} />} label="Settings" active={activeTab === "settings"} onClick={() => setActiveTab("settings")} />
               </nav>
@@ -687,7 +717,7 @@ export default function AureumWallet() {
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-10">
-                    {PROPERTIES.map(prop => (
+                    {properties.map(prop => (
                       <div key={prop.id} onClick={() => setSelectedProperty(prop)} className="cursor-pointer group">
                         <div className="relative h-80 rounded-3xl overflow-hidden mb-6">
                           <img src={prop.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
@@ -823,6 +853,103 @@ export default function AureumWallet() {
                     </div>
                   </div>
                 </motion.div>
+              )}
+
+              {activeTab === "escrows" && (
+                <div className="max-w-5xl mx-auto">
+                  <div className="flex justify-between items-end mb-12">
+                    <div>
+                      <h2 className="text-xs uppercase tracking-[0.4em] text-gray-500 mb-2 font-bold">Escrow management</h2>
+                      <h1 className="text-5xl font-bold font-premium tracking-tighter italic">Active Agreements</h1>
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
+                    {escrows.length > 0 ? escrows.filter(e => e.sender === walletAddress || e.receiver === walletAddress || e.arbiter === walletAddress).map((escrow, i) => (
+                      <div key={i} className="core-card p-8 glass-panel border-white/5 relative overflow-hidden">
+                        <div className="flex justify-between items-start mb-6">
+                          <div>
+                            <div className="flex items-center gap-2 mb-2">
+                              <Shield className="text-red-500" size={16} />
+                              <span className="text-[10px] uppercase font-bold text-gray-400 tracking-widest">Escrow #{escrow.id.substring(0, 8)}</span>
+                            </div>
+                            <h3 className="text-2xl font-bold font-premium">{escrow.amount.toLocaleString()} AUR</h3>
+                            <p className="text-gray-500 text-sm mt-1">{escrow.conditions}</p>
+                          </div>
+                          <div className={`px-4 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${escrow.status === "Pending" ? "bg-amber-500/10 text-amber-500" :
+                            escrow.status === "Released" ? "bg-emerald-500/10 text-emerald-500" :
+                              "bg-red-500/10 text-red-500"
+                            }`}>
+                            {escrow.status}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-6 mb-8 py-6 border-y border-white/5">
+                          <div>
+                            <div className="text-[10px] uppercase text-gray-500 font-bold mb-1">Sender</div>
+                            <div className="text-xs font-mono text-gray-300">{escrow.sender.substring(0, 10)}...</div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] uppercase text-gray-500 font-bold mb-1">Receiver</div>
+                            <div className="text-xs font-mono text-gray-300">{escrow.receiver.substring(0, 10)}...</div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] uppercase text-gray-500 font-bold mb-1">Arbiter</div>
+                            <div className="text-xs font-mono text-gray-300">{escrow.arbiter.substring(0, 10)}...</div>
+                          </div>
+                        </div>
+
+                        {escrow.status === "Pending" && (
+                          <div className="flex gap-4">
+                            {(walletAddress === escrow.sender || walletAddress === escrow.arbiter) && (
+                              <button
+                                onClick={async () => {
+                                  setIsProcessing(true);
+                                  try {
+                                    await releaseEscrow(walletAddress, escrow.id, nonce, privateKey);
+                                    alert("Funds released successfully!");
+                                    fetchWalletData();
+                                  } catch (e) {
+                                    alert("Failed to release funds: " + e);
+                                  }
+                                  setIsProcessing(false);
+                                }}
+                                disabled={isProcessing}
+                                className="btn-primary py-3 px-8 text-xs flex-1"
+                              >
+                                Release Funds
+                              </button>
+                            )}
+                            {walletAddress === escrow.arbiter && (
+                              <button
+                                className="btn-outline py-3 px-8 text-xs flex-1"
+                                onClick={async () => {
+                                  setIsProcessing(true);
+                                  try {
+                                    await refundEscrow(walletAddress, escrow.id, nonce, privateKey);
+                                    alert("Refund initiated successfully!");
+                                    fetchWalletData();
+                                  } catch (e) {
+                                    alert("Failed to refund: " + e);
+                                  }
+                                  setIsProcessing(false);
+                                }}
+                                disabled={isProcessing}
+                              >
+                                Request Refund
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )) : (
+                      <div className="text-center py-20 border-2 border-dashed border-white/5 rounded-3xl">
+                        <Shield className="mx-auto text-gray-700 mb-4" size={48} />
+                        <p className="text-gray-500 font-bold uppercase tracking-widest text-xs">No active escrows found</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
               )}
 
               {activeTab === "markets" && (
