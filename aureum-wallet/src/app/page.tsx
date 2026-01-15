@@ -935,18 +935,32 @@ export default function AureumWallet() {
                                 onClick={async () => {
                                   setIsProcessing(true);
                                   try {
-                                    await releaseEscrow(walletAddress, escrow.id, nonce, privateKey);
-                                    alert("Funds released successfully!");
-                                    fetchWalletData();
-                                  } catch (e) {
-                                    alert("Failed to release funds: " + e);
+                                    // Fetch fresh nonce before submitting
+                                    const currentNonce = await getNonce(walletAddress);
+                                    console.log("Releasing escrow with nonce:", currentNonce);
+
+                                    const txHash = await releaseEscrow(walletAddress, escrow.id, currentNonce, privateKey);
+                                    console.log("Release transaction hash:", txHash);
+
+                                    if (txHash && (txHash.startsWith("A") || txHash.length > 10)) {
+                                      alert(`Funds released successfully! TX: ${txHash}`);
+                                      // Wait a moment for the transaction to be included in a block
+                                      await new Promise(resolve => setTimeout(resolve, 2000));
+                                      fetchWalletData();
+                                    } else {
+                                      alert("Transaction failed: " + txHash);
+                                    }
+                                  } catch (e: any) {
+                                    console.error("Release escrow error:", e);
+                                    alert("Failed to release funds: " + (e.message || e));
+                                  } finally {
+                                    setIsProcessing(false);
                                   }
-                                  setIsProcessing(false);
                                 }}
                                 disabled={isProcessing}
                                 className="btn-primary py-3 px-8 text-xs flex-1"
                               >
-                                Release Funds
+                                {isProcessing ? "Processing..." : "Release Funds"}
                               </button>
                             )}
                             {walletAddress === escrow.arbiter && (
@@ -955,17 +969,30 @@ export default function AureumWallet() {
                                 onClick={async () => {
                                   setIsProcessing(true);
                                   try {
-                                    await refundEscrow(walletAddress, escrow.id, nonce, privateKey);
-                                    alert("Refund initiated successfully!");
-                                    fetchWalletData();
-                                  } catch (e) {
-                                    alert("Failed to refund: " + e);
+                                    // Fetch fresh nonce before submitting
+                                    const currentNonce = await getNonce(walletAddress);
+                                    console.log("Refunding escrow with nonce:", currentNonce);
+
+                                    const txHash = await refundEscrow(walletAddress, escrow.id, currentNonce, privateKey);
+                                    console.log("Refund transaction hash:", txHash);
+
+                                    if (txHash && (txHash.startsWith("A") || txHash.length > 10)) {
+                                      alert(`Refund initiated successfully! TX: ${txHash}`);
+                                      await new Promise(resolve => setTimeout(resolve, 2000));
+                                      fetchWalletData();
+                                    } else {
+                                      alert("Refund failed: " + txHash);
+                                    }
+                                  } catch (e: any) {
+                                    console.error("Refund escrow error:", e);
+                                    alert("Failed to refund: " + (e.message || e));
+                                  } finally {
+                                    setIsProcessing(false);
                                   }
-                                  setIsProcessing(false);
                                 }}
                                 disabled={isProcessing}
                               >
-                                Request Refund
+                                {isProcessing ? "Processing..." : "Request Refund"}
                               </button>
                             )}
                           </div>
