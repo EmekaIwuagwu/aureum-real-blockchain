@@ -463,7 +463,7 @@ export async function refundEscrow(
  * Get account balance in AUR
  */
 export async function getBalance(address: string): Promise<number> {
-    const balance = await rpcCall("eth_getBalance", [address]);
+    const balance = await rpcCall("aureum_getBalance", [address]);
     return typeof balance === "number" ? balance : parseInt(balance || "0");
 }
 
