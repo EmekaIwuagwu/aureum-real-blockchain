@@ -22,7 +22,9 @@ import {
   refundEscrow,
   listProperties,
   listEscrows,
-  RPC_URL
+  RPC_URL,
+  getRpcUrl,
+  setGlobalRpcUrl
 } from "../lib/blockchain";
 import nacl from "tweetnacl";
 import { keccak256 } from "js-sha3";
@@ -84,7 +86,7 @@ export default function AureumWallet() {
   const [activeTab, setActiveTab] = useState("assets");
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
   const [showPK, setShowPK] = useState(false);
-  const [rpcServer, setRpcServer] = useState("http://127.0.0.1:3030");
+  const [rpcServer, setRpcServer] = useState(getRpcUrl());
   const [isSending, setIsSending] = useState(false);
   const [isReceiving, setIsReceiving] = useState(false);
   const [isPayingEscrow, setIsPayingEscrow] = useState(false);
@@ -339,6 +341,13 @@ export default function AureumWallet() {
 
       document.body.removeChild(textArea);
     }
+  };
+
+  const handleSaveRpc = () => {
+    setGlobalRpcUrl(rpcServer);
+    alert("RPC Configuration Updated: " + rpcServer);
+    // Restart polling or refresh
+    fetchWalletData();
   };
 
   const handleTokenize = async () => {

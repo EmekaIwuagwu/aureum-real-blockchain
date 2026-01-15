@@ -4,19 +4,32 @@
  * Provides type-safe methods to interact with the Aureum Layer 1 blockchain node
  */
 
-const getRpcUrl = () => {
-    if (process.env.NEXT_PUBLIC_RPC_URL) return process.env.NEXT_PUBLIC_RPC_URL;
+const DEFAULT_RPC = "http://localhost:8545";
+
+const detectRpcUrl = () => {
     if (typeof window !== "undefined") {
+        // 1. Check localStorage first
+        const saved = localStorage.getItem("AUREUM_RPC_URL");
+        if (saved) return saved;
+
+        // 2. Detect from hostname
         const host = window.location.hostname;
-        // If we're not on localhost, assume the RPC is on the same host at port 8545
-        if (host !== "localhost" && host !== "127.0.0.1" && !host.includes("0.0.0.0")) {
+        if (host !== "localhost" && host !== "127.0.0.1") {
             return `http://${host}:8545`;
         }
     }
-    return "http://localhost:8545";
+    return process.env.NEXT_PUBLIC_RPC_URL || DEFAULT_RPC;
 };
 
-const RPC_URL = getRpcUrl();
+let currentRpcUrl = detectRpcUrl();
+
+export const getRpcUrl = () => currentRpcUrl;
+export const setGlobalRpcUrl = (url: string) => {
+    currentRpcUrl = url;
+    if (typeof window !== "undefined") {
+        localStorage.setItem("AUREUM_RPC_URL", url);
+    }
+};
 
 interface RPCRequest {
     jsonrpc: "2.0";
@@ -49,7 +62,7 @@ async function rpcCall(method: string, params: any[] = []): Promise<any> {
     };
 
     try {
-        const response = await fetch(RPC_URL, {
+        const response = await fetch(currentRpcUrl, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -537,5 +550,5 @@ export function useBlockchainPoll(
     return () => clearInterval(interval);
 }
 
-// Export RPC URL for configuration display
-export { RPC_URL };
+// Export current server for initial state
+export const RPC_URL = currentRpcUrl;
