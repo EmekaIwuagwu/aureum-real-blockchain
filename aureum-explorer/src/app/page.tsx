@@ -13,6 +13,8 @@ import {
 
 import { getLatestBlock, getRecentBlocks, isNodeOnline, getBlockByNumber, getChainState, getValidators, RPC_URL } from "../lib/blockchain";
 
+type ViewType = "home" | "blocks" | "transactions" | "markets" | "assets" | "block_detail";
+
 const getTxTypeLabel = (txType: any) => {
   if (!txType || txType === "Transfer") return "Standard Transfer";
   if (typeof txType === "string") return txType;
@@ -20,6 +22,38 @@ const getTxTypeLabel = (txType: any) => {
     return Object.keys(txType)[0].replace(/([A-Z])/g, ' $1').trim();
   }
   return "Unknown";
+};
+
+const copyToClipboard = async (text: string) => {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      alert("Copied to clipboard!");
+    } else {
+      throw new Error("Clipboard API unavailable");
+    }
+  } catch (e) {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-9999px";
+    textArea.style.top = "0";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+      const successful = document.execCommand('copy');
+      if (successful) {
+        alert("Copied to clipboard!");
+      } else {
+        throw new Error("execCommand unsuccessful");
+      }
+    } catch (err) {
+      console.error("Fallback copy failed", err);
+      alert("Failed to copy. Please copy manually.");
+    }
+    document.body.removeChild(textArea);
+  }
 };
 
 export default function AureumExplorer() {
@@ -651,7 +685,7 @@ function DetailRow({ label, value, copyable, isLink }: { label: string, value: s
     <div className="explorer-card p-6 flex flex-col md:flex-row md:items-center gap-4 transition-colors hover:bg-white/5">
       <div className="w-48 text-[10px] uppercase text-gray-500 font-black tracking-widest">{label}</div>
       <div className={`flex-1 font-mono text-xs leading-relaxed ${isLink ? "text-red-500 cursor-pointer hover:underline" : "text-gray-300"}`}>{value}</div>
-      {copyable && <button className="text-gray-600 hover:text-white transition-colors uppercase text-[8px] font-bold tracking-widest px-3 py-1 bg-white/5 rounded">Copy</button>}
+      {copyable && <button onClick={() => copyToClipboard(value)} className="text-gray-600 hover:text-white transition-colors uppercase text-[8px] font-bold tracking-widest px-3 py-1 bg-white/5 rounded">Copy</button>}
     </div>
   );
 }
