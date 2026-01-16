@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, Box, Activity, Cpu, Globe, ArrowRightLeft,
@@ -36,7 +37,8 @@ export default function AureumExplorer() {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [validators, setValidators] = useState<any[]>([]);
   const [isOnline, setIsOnline] = useState(false);
-
+  const [walletOnline, setWalletOnline] = useState(false);
+  const searchParams = useSearchParams();
   const [chainState, setChainState] = useState<any>(null);
   const [health, setHealth] = useState<any>(null);
   const [mounted, setMounted] = useState(false);
@@ -45,6 +47,10 @@ export default function AureumExplorer() {
     setMounted(true);
     const handleScroll = () => setScrolled(window.scrollY > 20);
     window.addEventListener("scroll", handleScroll);
+
+    // Initial view from URL
+    const viewParam = searchParams.get("view");
+    if (viewParam === "health") setView("health");
 
     // Initial fetch
     fetchData();
@@ -92,6 +98,14 @@ export default function AureumExplorer() {
 
     const healthInfo = await getNodeHealth();
     setHealth(healthInfo);
+
+    // Check Wallet Health (Internal Ping)
+    try {
+      const walletPing = await fetch("http://localhost:3000", { mode: 'no-cors' });
+      setWalletOnline(true);
+    } catch (e) {
+      setWalletOnline(false);
+    }
   };
 
   const handleSearch = (e: React.FormEvent) => {
@@ -336,8 +350,14 @@ export default function AureumExplorer() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
               <HealthCard label="Node Status" value={health?.status || "OFFLINE"} active={health?.status === "UP"} />
+              <HealthCard label="Wallet Status" value={walletOnline ? "OPERATIONAL" : "OFFLINE"} active={walletOnline} />
+              <HealthCard label="Explorer Status" value="OPERATIONAL" active={true} />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
               <HealthCard label="Uptime" value={health ? `${Math.floor(health.uptime / 3600)}h ${Math.floor((health.uptime % 3600) / 60)}m ${health.uptime % 60}s` : "0s"} active={!!health} />
               <HealthCard label="Mempool" value={health ? `${health.mempool_size} TXs` : "0 TXs"} active={!!health} />
+              <HealthCard label="Network Pulse" value="5s Blocks" active={isOnline} />
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
