@@ -99,6 +99,7 @@ fn init_node(data_dir: &str) {
 
 async fn run_node(data_dir: &str, rpc_port: u16) {
     info!("🚀 Aureum Node starting...");
+    let start_time = std::time::Instant::now();
     let storage = Arc::new(ChainStorage::new(&format!("{}/blockchain", data_dir)));
     let (_tx_sender, mut _tx_receiver) = mpsc::channel::<Vec<u8>>(1000);
     
@@ -610,6 +611,26 @@ async fn run_node(data_dir: &str, rpc_port: u16) {
         async move {
             let escrows = s.list_escrows();
             Ok(serde_json::to_value(escrows).unwrap())
+        }
+    });
+
+    let s_clone = storage.clone();
+    let m_clone = mempool.clone();
+    io.add_method("aureum_getHealth", move |_| {
+        let s = s_clone.clone();
+        let m = m_clone.clone();
+        let uptime = start_time.elapsed().as_secs();
+        async move {
+            let height = s.get_latest_height();
+            let mempool_size = m.lock().await.len();
+            Ok(serde_json::json!({
+                "status": "UP",
+                "uptime": uptime,
+                "height": height,
+                "mempool_size": mempool_size,
+                "version": "0.1.0",
+                "network": "Aureum Mainnet"
+            }))
         }
     });
 

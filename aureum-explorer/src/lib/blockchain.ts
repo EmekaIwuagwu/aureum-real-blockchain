@@ -141,6 +141,13 @@ export async function getValidators(): Promise<any> {
 }
 
 /**
+ * Get node health information
+ */
+export async function getNodeHealth(): Promise<any> {
+    return await rpcCall("aureum_getHealth", []);
+}
+
+/**
  * Check node health
  */
 export async function isNodeOnline(): Promise<boolean> {

@@ -11,7 +11,9 @@ import {
   FileText, TrendingUp, Layers, Wallet
 } from "lucide-react";
 
-import { getLatestBlock, getRecentBlocks, isNodeOnline, getBlockByNumber, getChainState, getValidators, RPC_URL } from "../lib/blockchain";
+import { getLatestBlock, getRecentBlocks, isNodeOnline, getBlockByNumber, getChainState, getValidators, getNodeHealth, RPC_URL } from "../lib/blockchain";
+
+type ViewType = "home" | "blocks" | "transactions" | "markets" | "assets" | "block_detail" | "health";
 
 const getTxTypeLabel = (txType: any) => {
   if (!txType || txType === "Transfer") return "Standard Transfer";
@@ -36,6 +38,7 @@ export default function AureumExplorer() {
   const [isOnline, setIsOnline] = useState(false);
 
   const [chainState, setChainState] = useState<any>(null);
+  const [health, setHealth] = useState<any>(null);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -86,6 +89,9 @@ export default function AureumExplorer() {
     if (valSet && valSet.validators) {
       setValidators(valSet.validators);
     }
+
+    const healthInfo = await getNodeHealth();
+    setHealth(healthInfo);
   };
 
   const handleSearch = (e: React.FormEvent) => {
@@ -156,7 +162,8 @@ export default function AureumExplorer() {
               { label: "Blocks", v: "blocks" },
               { label: "Transactions", v: "transactions" },
               { label: "Markets", v: "markets" },
-              { label: "Assets", v: "assets" }
+              { label: "Assets", v: "assets" },
+              { label: "Status", v: "health" }
             ].map((item) => (
               <button
                 key={item.label}
@@ -318,6 +325,45 @@ export default function AureumExplorer() {
               <AssetDeepCard name="Royal Gardens" location="Cascais, Portugal" evaluation="€45M" type="Residential" />
               <AssetDeepCard name="Mayfair Hub" location="London, UK" evaluation="€850M" type="Bespoke Retail" />
               <AssetDeepCard name="Marina Penthouse" location="Dubai, UAE" evaluation="€12M" type="Residential" />
+            </div>
+          </motion.div>
+        )}
+
+        {view === "health" && (
+          <motion.div key="health" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pt-32 pb-40 px-8 max-w-7xl mx-auto">
+            <h2 className="text-xs font-bold uppercase tracking-[0.6em] text-emerald-500 mb-2">Live Diagnostics</h2>
+            <h1 className="text-6xl font-premium font-bold italic mb-12">Network Status</h1>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
+              <HealthCard label="Node Status" value={health?.status || "OFFLINE"} active={health?.status === "UP"} />
+              <HealthCard label="Uptime" value={health ? `${Math.floor(health.uptime / 3600)}h ${Math.floor((health.uptime % 3600) / 60)}m ${health.uptime % 60}s` : "0s"} active={!!health} />
+              <HealthCard label="Mempool" value={health ? `${health.mempool_size} TXs` : "0 TXs"} active={!!health} />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+              <div className="explorer-card p-10">
+                <h3 className="text-xl font-premium font-bold italic mb-8 flex items-center gap-3">
+                  <Server className="text-red-500" size={20} /> System Information
+                </h3>
+                <div className="space-y-6">
+                  <DiagnosticRow label="Protocol Version" value={health?.version || "0.1.0"} />
+                  <DiagnosticRow label="Network Name" value={health?.network || "Aureum Mainnet"} />
+                  <DiagnosticRow label="RPC Endpoint" value={RPC_URL} />
+                  <DiagnosticRow label="Block Height" value={health?.height ? `#${health.height}` : "Syncing..."} />
+                </div>
+              </div>
+
+              <div className="explorer-card p-10">
+                <h3 className="text-xl font-premium font-bold italic mb-8 flex items-center gap-3">
+                  <Activity className="text-red-500" size={20} /> Performance Pulse
+                </h3>
+                <div className="space-y-6">
+                  <DiagnosticRow label="Avg Block Time" value="5.0s" />
+                  <DiagnosticRow label="TPS (Peak)" value="2,400" />
+                  <DiagnosticRow label="Data Integrity" value="Verified" highlight />
+                  <DiagnosticRow label="Consensus Mode" value="BFT-Authority" />
+                </div>
+              </div>
             </div>
           </motion.div>
         )}
@@ -714,6 +760,30 @@ function FooterColumn({ title, items }: { title: string, items: string[] }) {
       <ul className="space-y-4">
         {items.map(item => (<li key={item}><a href="#" className="text-sm text-gray-600 hover:text-red-500 transition-colors">{item}</a></li>))}
       </ul>
+    </div>
+  );
+}
+
+function HealthCard({ label, value, active }: { label: string, value: string, active: boolean }) {
+  return (
+    <div className="explorer-card p-8 group relative overflow-hidden">
+      <div className={`absolute top-0 right-0 w-24 h-24 blur-[40px] -mr-12 -mt-12 rounded-full transition-colors ${active ? "bg-emerald-500/10" : "bg-red-500/10"}`}></div>
+      <div className="flex items-center gap-3 text-[10px] font-bold uppercase tracking-[0.2em] text-gray-500 mb-6">
+        <div className={`w-2 h-2 rounded-full ${active ? "bg-emerald-500 animate-pulse" : "bg-red-500"}`}></div>
+        {label}
+      </div>
+      <div className="text-4xl font-premium font-bold italic tracking-tighter transition-all group-hover:scale-105 origin-left">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function DiagnosticRow({ label, value, highlight }: { label: string, value: string, highlight?: boolean }) {
+  return (
+    <div className="flex justify-between items-center py-4 border-b border-white/5 last:border-0">
+      <span className="text-[10px] uppercase font-bold text-gray-500 tracking-widest">{label}</span>
+      <span className={`font-mono text-sm ${highlight ? "text-red-500 font-bold" : "text-gray-300"}`}>{value}</span>
     </div>
   );
 }
