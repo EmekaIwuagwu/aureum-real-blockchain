@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  aureum-node:
+    build:
+      context: ./aureum-node
+      dockerfile: ../Dockerfile.node
+    ports:
+      - "8545:8545"
+    volumes:
+      - aureum-data:/app/data
+    restart: always
+
+  aureum-wallet:
+    build:
+      context: ./aureum-wallet
+      dockerfile: ../Dockerfile.wallet
+      args:
+        NEXT_PUBLIC_RPC_URL: http://aureum-node:8545
+    ports:
+      - "3000:3000"
+    depends_on:
+      - aureum-node
+    restart: always
+
+  aureum-explorer:
+    build:
+      context: ./aureum-explorer
+      dockerfile: ../Dockerfile.explorer
+      args:
+        NEXT_PUBLIC_RPC_URL: http://aureum-node:8545
+    ports:
+      - "3001:3001"
+    depends_on:
+      - aureum-node
+    restart: always
+
+volumes:
+  aureum-data:
