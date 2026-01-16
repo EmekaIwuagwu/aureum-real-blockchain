@@ -305,6 +305,7 @@ export async function createEscrow(
     arbiter: string,
     amount: number,
     conditions: string,
+    propertyId: string | null,
     nonce: number,
     privateKeyHex: string
 ): Promise<string> {
@@ -324,7 +325,18 @@ export async function createEscrow(
     const arbiterBytes = encodeString(arbiter);
     const condBytes = encodeString(conditions);
 
-    const totalLen = senderBytes.length + receiverBytes.length + amountBytes.length + nonceBytes.length + feeBytes.length + pubKey.length + typeBytes.length + arbiterBytes.length + condBytes.length;
+    // SCALE encode Option<String> for propertyId
+    let propIdEncoded: Uint8Array;
+    if (propertyId) {
+        const propIdBytes = encodeString(propertyId);
+        propIdEncoded = new Uint8Array(1 + propIdBytes.length);
+        propIdEncoded[0] = 1; // Some
+        propIdEncoded.set(propIdBytes, 1);
+    } else {
+        propIdEncoded = new Uint8Array([0]); // None
+    }
+
+    const totalLen = senderBytes.length + receiverBytes.length + amountBytes.length + nonceBytes.length + feeBytes.length + pubKey.length + typeBytes.length + arbiterBytes.length + condBytes.length + propIdEncoded.length;
     const message = new Uint8Array(totalLen);
 
     let offset = 0;
@@ -336,7 +348,8 @@ export async function createEscrow(
     message.set(pubKey, offset); offset += pubKey.length;
     message.set(typeBytes, offset); offset += typeBytes.length;
     message.set(arbiterBytes, offset); offset += arbiterBytes.length;
-    message.set(condBytes, offset);
+    message.set(condBytes, offset); offset += condBytes.length;
+    message.set(propIdEncoded, offset);
 
     const signature = nacl.sign.detached(message, keyPair.secretKey);
 
@@ -348,7 +361,7 @@ export async function createEscrow(
         fee: 50,
         signature: Array.from(signature),
         pub_key: Array.from(pubKey),
-        tx_type: { EscrowCreate: { arbiter, conditions } }
+        tx_type: { EscrowCreate: { arbiter, conditions, property_id: propertyId } }
     };
 
     return await rpcCall("aureum_submitTransaction", [tx]);

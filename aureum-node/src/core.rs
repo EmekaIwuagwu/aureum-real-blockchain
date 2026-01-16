@@ -29,7 +29,7 @@ pub enum TransactionType {
     SubmitOracleReport { report: crate::oracle::OracleReport },
     TransferFraction { property_id: String, to: String, basis_points: u64 },
     CreateMultiSig { owners: Vec<String>, threshold: u8 },
-    EscrowCreate { arbiter: String, conditions: String },
+    EscrowCreate { arbiter: String, conditions: String, property_id: Option<String> },
     EscrowRelease { escrow_id: String },
     EscrowRefund { escrow_id: String },
 }
@@ -40,6 +40,14 @@ pub enum VisaProgram {
     Spain,
     Greece,
     UAE,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode, PartialEq)]
+pub enum PropertyStatus {
+    Available,
+    InEscrow,
+    Sold,
+    Delisted,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode, PartialEq)]
@@ -231,6 +239,7 @@ pub struct Property {
     pub aml_cleared: bool,
     pub mortgages: Vec<String>,
     pub liens: Vec<String>,
+    pub status: PropertyStatus,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
@@ -257,6 +266,7 @@ pub struct Escrow {
     pub arbiter: String,
     pub amount: u64,
     pub conditions: String,
+    pub property_id: Option<String>,
     pub status: EscrowStatus,
     pub created_at: u64,
 }

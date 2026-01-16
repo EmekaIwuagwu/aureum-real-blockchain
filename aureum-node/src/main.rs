@@ -264,6 +264,7 @@ async fn run_node(data_dir: &str, rpc_port: u16) {
                                                 aml_cleared: true,
                                                 mortgages: vec![],
                                                 liens: vec![],
+                                                status: PropertyStatus::Available,
                                             };
                                             storage_loop.save_property(&prop);
                                             storage_loop.increment_nonce(&tx.sender);
@@ -284,7 +285,7 @@ async fn run_node(data_dir: &str, rpc_port: u16) {
                                             info!("🛂 Visa Application Submitted: {} for {:?}", app.applicant, app.program);
                                         }
 
-                                        TransactionType::EscrowCreate { arbiter, conditions } => {
+                                        TransactionType::EscrowCreate { arbiter, conditions, property_id } => {
                                             let sender_balance = storage_loop.get_balance(&tx.sender);
                                             let total_cost = tx.amount + tx.fee;
                                             
@@ -301,10 +302,21 @@ async fn run_node(data_dir: &str, rpc_port: u16) {
                                                     arbiter: arbiter.clone(),
                                                     amount: tx.amount,
                                                     conditions: conditions.clone(),
+                                                    property_id: property_id.clone(),
                                                     status: EscrowStatus::Pending,
                                                     created_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
                                                 };
                                                 storage_loop.save_escrow(&escrow);
+
+                                                // 3. Update Property Status if linked
+                                                if let Some(prop_id) = property_id {
+                                                    if let Some(mut prop) = storage_loop.get_property(prop_id) {
+                                                        prop.status = PropertyStatus::InEscrow;
+                                                        storage_loop.save_property(&prop);
+                                                        info!("🏠 Property {} status updated to InEscrow", prop_id);
+                                                    }
+                                                }
+
                                                 info!("🔒 Escrow Created: {} ({} AUR locked)", escrow.id, escrow.amount);
                                             } else {
                                                 error!("❌ Escrow Create Failed: Insufficient Fund {}", tx.sender);
@@ -328,6 +340,15 @@ async fn run_node(data_dir: &str, rpc_port: u16) {
                                                         let sender_balance = storage_loop.get_balance(&tx.sender);
                                                         if sender_balance >= tx.fee {
                                                              storage_loop.update_balance(&tx.sender, sender_balance - tx.fee);
+                                                        }
+
+                                                        // Update Property Status if linked
+                                                        if let Some(ref prop_id) = escrow.property_id {
+                                                            if let Some(mut prop) = storage_loop.get_property(prop_id) {
+                                                                prop.status = PropertyStatus::Sold;
+                                                                storage_loop.save_property(&prop);
+                                                                info!("🏠 Property {} status updated to Sold (Released)", prop_id);
+                                                            }
                                                         }
 
                                                         storage_loop.increment_nonce(&tx.sender);
@@ -358,6 +379,15 @@ async fn run_node(data_dir: &str, rpc_port: u16) {
                                                         let arbiter_balance = storage_loop.get_balance(&tx.sender);
                                                         if arbiter_balance >= tx.fee {
                                                              storage_loop.update_balance(&tx.sender, arbiter_balance - tx.fee);
+                                                        }
+
+                                                        // Update Property Status if linked (back to Available)
+                                                        if let Some(ref prop_id) = escrow.property_id {
+                                                            if let Some(mut prop) = storage_loop.get_property(prop_id) {
+                                                                prop.status = PropertyStatus::Available;
+                                                                storage_loop.save_property(&prop);
+                                                                info!("🏠 Property {} status reverted to Available (Refunded)", prop_id);
+                                                            }
                                                         }
 
                                                         storage_loop.increment_nonce(&tx.sender);

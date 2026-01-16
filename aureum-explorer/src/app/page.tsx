@@ -471,6 +471,12 @@ export default function AureumExplorer() {
                             <div className="text-[10px] uppercase text-gray-500 font-bold tracking-widest mb-1">Conditions</div>
                             <div className="font-premium text-lg italic">{selectedItem.tx_type.EscrowCreate.conditions}</div>
                           </div>
+                          {selectedItem.tx_type.EscrowCreate.property_id && (
+                            <div>
+                              <div className="text-[10px] uppercase text-gray-500 font-bold tracking-widest mb-1">Linked Property</div>
+                              <div className="font-mono text-xs text-red-500">{selectedItem.tx_type.EscrowCreate.property_id}</div>
+                            </div>
+                          )}
                         </>
                       )}
 

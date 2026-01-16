@@ -42,43 +42,9 @@ interface Property {
   phone: string;
   description: string;
   image: string;
+  status: "Available" | "InEscrow" | "Sold" | "Delisted";
+  ownerAddress: string;
 }
-
-const PROPERTIES: Property[] = [
-  {
-    id: "prop_1",
-    name: "Golden Palace Lisbon",
-    location: "Avenida da Liberdade, Lisbon",
-    price: "€500,000",
-    yield: "5.4%",
-    landlord: "Ricardo Silva",
-    phone: "+351 912 345 678",
-    description: "Ultra-luxury penthouse with panoramic views of the Tagus River. High-performance rental yields with Golden Visa eligibility.",
-    image: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&q=80&w=800"
-  },
-  {
-    id: "prop_2",
-    name: "Azure Porto Heights",
-    location: "Ribeira District, Porto",
-    price: "€350,000",
-    yield: "6.1%",
-    landlord: "Maria Fernandez",
-    phone: "+351 934 567 890",
-    description: "Modern architectural marvel in the heart of Porto's historic district. Includes full property management services.",
-    image: "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&q=80&w=800"
-  },
-  {
-    id: "prop_3",
-    name: "Algarve Beachfront Villa",
-    location: "Vilamoura, Algarve",
-    price: "€1,200,000",
-    yield: "4.2%",
-    landlord: "João Pereira",
-    phone: "+351 922 888 777",
-    description: "Exclusive beachfront property with private access and sustainable energy systems. Top-tier institutional asset.",
-    image: "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&q=80&w=800"
-  }
-];
 
 export default function AureumWallet() {
   const [step, setStep] = useState<AppStep>("landing");
@@ -150,16 +116,19 @@ export default function AureumWallet() {
       const props = await listProperties();
       const mappedProps: Property[] = props.map((p: any) => ({
         id: p.id,
-        name: p.legal_description.includes(',') ? p.legal_description.split(',')[0] : "Aureum Premium Estate",
+        name: p.legal_description && p.legal_description.includes(',') ? p.legal_description.split(',')[0] : (p.legal_description || "Aureum Premium Estate"),
         location: p.jurisdiction + (p.legal_description ? `, ${p.legal_description}` : ""),
         price: `${(p.valuation_eur / 1000).toFixed(0)}k AUR`,
-        yield: "6.2%", // Default yield for on-chain props
+        yield: "6.2%",
         landlord: p.owner.substring(0, 10) + "...",
         phone: "+351 XXX XXX XXX",
         description: `Tokenized Real Estate Asset on Aureum L1. Valuation: ${p.valuation_eur} EUR. Eligible for Golden Visa.`,
-        image: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&q=80&w=800" // Default image for demo
+        image: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&q=80&w=800",
+        status: p.status || "Available",
+        ownerAddress: p.owner
       }));
-      setProperties([...PROPERTIES, ...mappedProps]);
+      // Only show Available properties in the marketplace
+      setProperties(mappedProps.filter(p => p.status === "Available"));
 
       const es = await listEscrows();
       setEscrows(es);
@@ -188,24 +157,26 @@ export default function AureumWallet() {
     if (!selectedProperty || !privateKey) return;
     setIsPayingEscrow(true);
     try {
-      // Create Escrow with the landlord as the receiver and the user (sender) as the arbiter for demo flexibility
-      // In a real scenario, the arbiter would be a 3rd party (e.g. Validator or Legal Firm)
-      // Amount is hardcoded to 50,000 AUR for demo
+      // Use actual property price and ID
+      const numericPrice = parseInt(selectedProperty.price.replace(/[^0-9]/g, "")) * 1000;
+
       const hash = await createEscrow(
         walletAddress,
-        "A1109cd8305ff4145b0b89495431540d1f4faecdc", // Default Validator/Landlord for demo
-        walletAddress, // Self-Arbtered for demo ease
-        50000,
+        selectedProperty.ownerAddress, // Use dynamic owner from property
+        walletAddress, // Arbiter (Demo Simplification)
+        numericPrice,
         `Purchase of ${selectedProperty.name}`,
+        selectedProperty.id, // Linked Property ID for delisting
         nonce,
         privateKey
       );
 
-      if (hash && hash.startsWith("A") || hash.length > 10) {
+      if (hash && (hash.startsWith("A") || hash.length > 10)) {
         setCurrentEscrowId(hash);
         setEscrowStep("locked");
+        // Refetch to reflect Property status change (InEscrow)
         fetchWalletData();
-        alert("Funds Locked in Escrow! ID: " + hash);
+        alert("Funds Locked in Escrow and Property Delisted! ID: " + hash);
       } else {
         alert("Escrow Failed: " + hash);
       }
